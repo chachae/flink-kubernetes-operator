@@ -28,12 +28,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for scaling metrics computation logic. */
 public class ScalingMetricsTest {
@@ -57,22 +56,24 @@ public class ScalingMetricsTest {
                         FlinkMetric.BUSY_TIME_PER_SEC,
                         new AggregatedMetric("", Double.NaN, 100., Double.NaN, Double.NaN),
                         FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(1000.),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 1000.),
                         FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(2000.)),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 2000.)),
                 scalingMetrics,
                 topology,
-                15.,
+                Optional.of(15.),
                 new Configuration());
 
         assertEquals(
                 Map.of(
                         ScalingMetric.TRUE_PROCESSING_RATE,
                         10000.,
+                        ScalingMetric.TRUE_OUTPUT_RATE,
+                        20000.,
+                        ScalingMetric.OUTPUT_RATIO,
+                        2.,
                         ScalingMetric.SOURCE_DATA_RATE,
-                        1015.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        1000.),
+                        1015.),
                 scalingMetrics);
 
         // test negative lag growth (catch up)
@@ -83,22 +84,24 @@ public class ScalingMetricsTest {
                         FlinkMetric.BUSY_TIME_PER_SEC,
                         new AggregatedMetric("", Double.NaN, 100., Double.NaN, Double.NaN),
                         FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(1000.),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 1000.),
                         FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(2000.)),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 2000.)),
                 scalingMetrics,
                 topology,
-                -50.,
+                Optional.of(-50.),
                 new Configuration());
 
         assertEquals(
                 Map.of(
                         ScalingMetric.TRUE_PROCESSING_RATE,
                         10000.,
+                        ScalingMetric.TRUE_OUTPUT_RATE,
+                        20000.,
+                        ScalingMetric.OUTPUT_RATIO,
+                        2.,
                         ScalingMetric.SOURCE_DATA_RATE,
-                        950.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        1000.),
+                        950.),
                 scalingMetrics);
 
         scalingMetrics.clear();
@@ -108,20 +111,22 @@ public class ScalingMetricsTest {
                         FlinkMetric.BUSY_TIME_PER_SEC,
                         new AggregatedMetric("", Double.NaN, 100., Double.NaN, Double.NaN),
                         FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(1000.),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 1000.),
                         FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(2000.)),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 2000.)),
                 scalingMetrics,
                 topology,
-                0.,
+                Optional.empty(),
                 new Configuration());
 
         assertEquals(
                 Map.of(
                         ScalingMetric.TRUE_PROCESSING_RATE,
                         10000.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        1000.),
+                        ScalingMetric.TRUE_OUTPUT_RATE,
+                        20000.,
+                        ScalingMetric.OUTPUT_RATIO,
+                        2.),
                 scalingMetrics);
 
         // Test using avg busyTime aggregator
@@ -134,62 +139,56 @@ public class ScalingMetricsTest {
                         FlinkMetric.BUSY_TIME_PER_SEC,
                         new AggregatedMetric("", Double.NaN, Double.NaN, 100., Double.NaN),
                         FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(1000.),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 1000.),
                         FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(2000.)),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 2000.)),
                 scalingMetrics,
                 topology,
-                0.,
+                Optional.empty(),
                 conf);
 
         assertEquals(
                 Map.of(
                         ScalingMetric.TRUE_PROCESSING_RATE,
                         10000.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        1000.),
+                        ScalingMetric.TRUE_OUTPUT_RATE,
+                        20000.,
+                        ScalingMetric.OUTPUT_RATIO,
+                        2.),
                 scalingMetrics);
     }
 
     @Test
-    public void testLegacySourceScaling() {
+    public void testSourceScalingDisabled() {
         var source = new JobVertexID();
-        var sink = new JobVertexID();
 
-        var topology =
-                new JobTopology(
-                        new VertexInfo(source, Collections.emptySet(), 5, 1),
-                        new VertexInfo(sink, Collections.singleton(source), 10, 100));
+        var topology = new JobTopology(new VertexInfo(source, Collections.emptySet(), 1, 1));
 
         Configuration conf = new Configuration();
-        assertTrue(conf.get(AutoScalerOptions.VERTEX_EXCLUDE_IDS).isEmpty());
-        conf.set(AutoScalerOptions.VERTEX_EXCLUDE_IDS, List.of(sink.toHexString()));
+        // Disable scaling sources
+        conf.setBoolean(AutoScalerOptions.SOURCE_SCALING_ENABLED, false);
 
         Map<ScalingMetric, Double> scalingMetrics = new HashMap<>();
         ScalingMetrics.computeDataRateMetrics(
                 source,
                 Map.of(
-                        // Busy time is NaN for legacy sources
                         FlinkMetric.BUSY_TIME_PER_SEC,
-                        aggSum(Double.NaN),
+                        new AggregatedMetric("", Double.NaN, 500., Double.NaN, Double.NaN),
                         FlinkMetric.SOURCE_TASK_NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(2000.),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 2000.),
                         FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(4000.)),
+                        new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 4000.)),
                 scalingMetrics,
                 topology,
-                0.,
+                Optional.empty(),
                 conf);
 
-        // Make sure vertex won't be scaled
-        assertTrue(conf.get(AutoScalerOptions.VERTEX_EXCLUDE_IDS).contains(source.toHexString()));
-        // Existing overrides should be preserved
-        assertTrue(conf.get(AutoScalerOptions.VERTEX_EXCLUDE_IDS).contains(sink.toHexString()));
-        // Legacy source rates are computed based on the current rate and a balanced utilization
-        assertEquals(
-                2000 / conf.get(AutoScalerOptions.TARGET_UTILIZATION),
-                scalingMetrics.get(ScalingMetric.TRUE_PROCESSING_RATE));
-        assertEquals(2000, scalingMetrics.get(ScalingMetric.SOURCE_DATA_RATE));
+        // Sources are not scaled, the rates are solely computed on the basis of the true output
+        // rate
+        assertEquals(Double.NaN, scalingMetrics.get(ScalingMetric.TRUE_PROCESSING_RATE));
+        assertEquals(8000, scalingMetrics.get(ScalingMetric.TARGET_DATA_RATE));
+        assertEquals(8000, scalingMetrics.get(ScalingMetric.TRUE_OUTPUT_RATE));
+        assertEquals(2, scalingMetrics.get(ScalingMetric.OUTPUT_RATIO));
     }
 
     @Test
@@ -203,187 +202,5 @@ public class ScalingMetricsTest {
 
         assertEquals(0.2, scalingMetrics.get(ScalingMetric.LOAD_MAX));
         assertEquals(0.1, scalingMetrics.get(ScalingMetric.LOAD_AVG));
-    }
-
-    @Test
-    public void testZeroValuesForBusyness() {
-        double dataRate = 10;
-        Map<ScalingMetric, Double> scalingMetrics =
-                testZeroValuesForRatesOrBusyness(dataRate, dataRate, 0);
-        assertEquals(
-                Map.of(
-                        ScalingMetric.TRUE_PROCESSING_RATE,
-                        // When not busy at all, we have infinite processing power
-                        Double.POSITIVE_INFINITY,
-                        ScalingMetric.SOURCE_DATA_RATE,
-                        dataRate,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        10.),
-                scalingMetrics);
-    }
-
-    @Test
-    public void testZeroValuesForRates() {
-        double busyMillisecondPerSec = 100;
-        Map<ScalingMetric, Double> scalingMetrics =
-                testZeroValuesForRatesOrBusyness(0, 0, busyMillisecondPerSec);
-        assertEquals(
-                Map.of(
-                        ScalingMetric.TRUE_PROCESSING_RATE,
-                        // When no records are coming in, we assume infinite processing power
-                        Double.POSITIVE_INFINITY,
-                        ScalingMetric.SOURCE_DATA_RATE,
-                        0.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        0.),
-                scalingMetrics);
-    }
-
-    @Test
-    public void testZeroProcessingRateOnly() {
-        Map<ScalingMetric, Double> scalingMetrics = testZeroValuesForRatesOrBusyness(0, 1, 100);
-        assertEquals(
-                Map.of(
-                        // If there is zero input the out ratio must be zero
-                        ScalingMetric.TRUE_PROCESSING_RATE,
-                        // When no records are coming in, we assume infinite processing power
-                        Double.POSITIVE_INFINITY,
-                        ScalingMetric.SOURCE_DATA_RATE,
-                        0.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        0.),
-                scalingMetrics);
-    }
-
-    @Test
-    public void testZeroValuesForRatesAndBusyness() {
-        Map<ScalingMetric, Double> scalingMetrics = testZeroValuesForRatesOrBusyness(0, 0, 0);
-        assertEquals(
-                Map.of(
-                        ScalingMetric.TRUE_PROCESSING_RATE,
-                        // Nothing is coming in, we must assume infinite processing power
-                        Double.POSITIVE_INFINITY,
-                        ScalingMetric.SOURCE_DATA_RATE,
-                        0.,
-                        ScalingMetric.CURRENT_PROCESSING_RATE,
-                        0.),
-                scalingMetrics);
-    }
-
-    private static Map<ScalingMetric, Double> testZeroValuesForRatesOrBusyness(
-            double processingRate, double outputRate, double busyness) {
-        var source = new JobVertexID();
-        var op = new JobVertexID();
-        var sink = new JobVertexID();
-
-        var topology =
-                new JobTopology(
-                        new VertexInfo(source, Collections.emptySet(), 1, 1),
-                        new VertexInfo(op, Set.of(source), 1, 1),
-                        new VertexInfo(sink, Set.of(op), 1, 1));
-
-        Map<ScalingMetric, Double> scalingMetrics = new HashMap<>();
-        ScalingMetrics.computeDataRateMetrics(
-                source,
-                Map.of(
-                        FlinkMetric.BUSY_TIME_PER_SEC,
-                        new AggregatedMetric("", Double.NaN, busyness, Double.NaN, Double.NaN),
-                        FlinkMetric.SOURCE_TASK_NUM_RECORDS_OUT_PER_SEC,
-                        new AggregatedMetric(
-                                "", Double.NaN, Double.NaN, Double.NaN, processingRate),
-                        FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(outputRate)),
-                scalingMetrics,
-                topology,
-                0.,
-                new Configuration());
-
-        return scalingMetrics;
-    }
-
-    @Test
-    public void testComputableOutputRatios() {
-        var source1 = new JobVertexID();
-        var source2 = new JobVertexID();
-
-        var op1 = new JobVertexID();
-        var sink1 = new JobVertexID();
-
-        var topology =
-                new JobTopology(
-                        new VertexInfo(source1, Collections.emptySet(), 1, 1),
-                        new VertexInfo(source2, Collections.emptySet(), 1, 1),
-                        new VertexInfo(op1, Set.of(source1, source2), 1, 1),
-                        new VertexInfo(sink1, Set.of(op1), 1, 1));
-
-        var allMetrics = new HashMap<JobVertexID, Map<FlinkMetric, AggregatedMetric>>();
-        allMetrics.put(
-                source1,
-                Map.of(
-                        FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(100),
-                        FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(200)));
-        allMetrics.put(
-                source2,
-                Map.of(
-                        FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(100),
-                        FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(50)));
-
-        allMetrics.put(op1, Map.of(FlinkMetric.NUM_RECORDS_IN_PER_SEC, aggSum(250)));
-        allMetrics.put(sink1, Map.of(FlinkMetric.NUM_RECORDS_IN_PER_SEC, aggSum(50)));
-
-        assertEquals(
-                Map.of(
-                        new Edge(source1, op1), 2.,
-                        new Edge(source2, op1), 0.5,
-                        new Edge(op1, sink1), 0.2),
-                ScalingMetrics.computeOutputRatios(allMetrics, topology));
-    }
-
-    @Test
-    public void testOutputRatioFallbackToOutPerSecond() {
-        var source1 = new JobVertexID();
-        var source2 = new JobVertexID();
-
-        var op1 = new JobVertexID();
-        var op2 = new JobVertexID();
-
-        var topology =
-                new JobTopology(
-                        new VertexInfo(source1, Collections.emptySet(), 1, 1),
-                        new VertexInfo(source2, Collections.emptySet(), 1, 1),
-                        new VertexInfo(op1, Set.of(source1, source2), 1, 1),
-                        new VertexInfo(op2, Set.of(source1, source2), 1, 1));
-
-        var allMetrics = new HashMap<JobVertexID, Map<FlinkMetric, AggregatedMetric>>();
-        allMetrics.put(
-                source1,
-                Map.of(
-                        FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(100),
-                        FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(200)));
-        allMetrics.put(
-                source2,
-                Map.of(
-                        FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                        aggSum(100),
-                        FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                        aggSum(50)));
-
-        assertEquals(
-                Map.of(
-                        new Edge(source1, op1), 2.,
-                        new Edge(source2, op1), 0.5,
-                        new Edge(source1, op2), 2.,
-                        new Edge(source2, op2), 0.5),
-                ScalingMetrics.computeOutputRatios(allMetrics, topology));
-    }
-
-    private static AggregatedMetric aggSum(double sum) {
-        return new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, sum);
     }
 }

@@ -24,10 +24,7 @@ import org.apache.flink.kubernetes.operator.TestUtils;
 import org.apache.flink.kubernetes.operator.TestingFlinkService;
 import org.apache.flink.kubernetes.operator.api.FlinkDeployment;
 import org.apache.flink.kubernetes.operator.autoscaler.config.AutoScalerOptions;
-import org.apache.flink.kubernetes.operator.autoscaler.metrics.CollectedMetricHistory;
-import org.apache.flink.kubernetes.operator.autoscaler.metrics.EvaluatedScalingMetric;
 import org.apache.flink.kubernetes.operator.autoscaler.metrics.FlinkMetric;
-import org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric;
 import org.apache.flink.kubernetes.operator.autoscaler.topology.JobTopology;
 import org.apache.flink.kubernetes.operator.autoscaler.topology.VertexInfo;
 import org.apache.flink.kubernetes.operator.config.FlinkConfigManager;
@@ -57,7 +54,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -172,6 +168,7 @@ public class MetricsCollectionAndEvaluationTest {
         collectedMetrics = metricsCollector.updateMetrics(app, scalingInfo, service, conf);
         assertEquals(3, collectedMetrics.getMetricHistory().size());
 
+        evaluator.setClock(clock);
         var evaluation = evaluator.evaluate(conf, collectedMetrics);
         scalingExecutor.scaleResource(app, scalingInfo, conf, evaluation);
 
@@ -256,6 +253,7 @@ public class MetricsCollectionAndEvaluationTest {
 
         var clock = Clock.fixed(Instant.now().plus(Duration.ofSeconds(3)), ZoneId.systemDefault());
         metricsCollector.setClock(clock);
+        evaluator.setClock(clock);
 
         var collectedMetrics = metricsCollector.updateMetrics(app, scalingInfo, service, conf);
 
@@ -264,6 +262,7 @@ public class MetricsCollectionAndEvaluationTest {
 
         clock = Clock.fixed(Instant.now().plus(Duration.ofSeconds(3)), ZoneId.systemDefault());
         metricsCollector.setClock(clock);
+        evaluator.setClock(clock);
 
         metricsCollector.setMetricNames(
                 Map.of(
@@ -353,98 +352,5 @@ public class MetricsCollectionAndEvaluationTest {
         // => no metrics reporting and collection should take place
         var collectedMetrics = metricsCollector.updateMetrics(app, scalingInfo, service, conf);
         assertTrue(collectedMetrics.getMetricHistory().isEmpty());
-    }
-
-    @Test
-    public void testTolerateAbsenceOfPendingRecordsMetric() throws Exception {
-        var topology = new JobTopology(new VertexInfo(source1, Set.of(), 5, 720));
-
-        metricsCollector = new TestingMetricsCollector(topology);
-        metricsCollector.setCurrentMetrics(
-                Map.of(
-                        // Set source1 metrics without the PENDING_RECORDS metric
-                        source1,
-                        Map.of(
-                                FlinkMetric.BUSY_TIME_PER_SEC,
-                                new AggregatedMetric("", Double.NaN, 100., Double.NaN, Double.NaN),
-                                FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                                new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 500.),
-                                FlinkMetric.NUM_RECORDS_IN_PER_SEC,
-                                new AggregatedMetric(
-                                        "", Double.NaN, Double.NaN, Double.NaN, 500.))));
-
-        var collectedMetrics = collectMetrics();
-
-        Map<JobVertexID, Map<ScalingMetric, EvaluatedScalingMetric>> evaluation =
-                evaluator.evaluate(conf, collectedMetrics);
-        assertEquals(
-                500., evaluation.get(source1).get(ScalingMetric.TARGET_DATA_RATE).getCurrent());
-        assertEquals(
-                5000.,
-                evaluation.get(source1).get(ScalingMetric.TRUE_PROCESSING_RATE).getCurrent());
-        assertEquals(
-                833.,
-                evaluation.get(source1).get(ScalingMetric.SCALE_DOWN_RATE_THRESHOLD).getCurrent());
-        assertEquals(
-                625.,
-                evaluation.get(source1).get(ScalingMetric.SCALE_UP_RATE_THRESHOLD).getCurrent());
-
-        scalingExecutor.scaleResource(app, scalingInfo, conf, evaluation);
-        var scaledParallelism = ScalingExecutorTest.getScaledParallelism(app);
-        assertEquals(1, scaledParallelism.get(source1));
-    }
-
-    @Test
-    public void testScaleDownWithZeroProcessingRate() throws Exception {
-        var topology = new JobTopology(new VertexInfo(source1, Set.of(), 10, 720));
-
-        metricsCollector = new TestingMetricsCollector(topology);
-        metricsCollector.setCurrentMetrics(
-                Map.of(
-                        // Set source1 metrics without the PENDING_RECORDS metric
-                        source1,
-                        Map.of(
-                                FlinkMetric.BUSY_TIME_PER_SEC,
-                                new AggregatedMetric("", Double.NaN, 0.1, Double.NaN, Double.NaN),
-                                FlinkMetric.NUM_RECORDS_OUT_PER_SEC,
-                                new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 0.),
-                                FlinkMetric.SOURCE_TASK_NUM_RECORDS_OUT_PER_SEC,
-                                new AggregatedMetric("", Double.NaN, Double.NaN, Double.NaN, 0.))));
-
-        var collectedMetrics = collectMetrics();
-
-        Map<JobVertexID, Map<ScalingMetric, EvaluatedScalingMetric>> evaluation =
-                evaluator.evaluate(conf, collectedMetrics);
-        assertEquals(0, evaluation.get(source1).get(ScalingMetric.TARGET_DATA_RATE).getCurrent());
-        assertEquals(
-                Double.POSITIVE_INFINITY,
-                evaluation.get(source1).get(ScalingMetric.TRUE_PROCESSING_RATE).getCurrent());
-        assertEquals(
-                0.,
-                evaluation.get(source1).get(ScalingMetric.SCALE_DOWN_RATE_THRESHOLD).getCurrent());
-        assertEquals(
-                0.,
-                evaluation.get(source1).get(ScalingMetric.SCALE_UP_RATE_THRESHOLD).getCurrent());
-
-        scalingExecutor.scaleResource(app, scalingInfo, conf, evaluation);
-        var scaledParallelism = ScalingExecutorTest.getScaledParallelism(app);
-        assertEquals(1, scaledParallelism.get(source1));
-    }
-
-    private CollectedMetricHistory collectMetrics() throws Exception {
-        conf.set(AutoScalerOptions.STABILIZATION_INTERVAL, Duration.ZERO);
-        conf.set(AutoScalerOptions.METRICS_WINDOW, Duration.ofSeconds(2));
-
-        metricsCollector.setClock(Clock.offset(clock, Duration.ofSeconds(1)));
-
-        var collectedMetrics = metricsCollector.updateMetrics(app, scalingInfo, service, conf);
-        assertTrue(collectedMetrics.getMetricHistory().isEmpty());
-
-        metricsCollector.setClock(Clock.offset(clock, Duration.ofSeconds(2)));
-
-        collectedMetrics = metricsCollector.updateMetrics(app, scalingInfo, service, conf);
-        assertFalse(collectedMetrics.getMetricHistory().isEmpty());
-
-        return collectedMetrics;
     }
 }

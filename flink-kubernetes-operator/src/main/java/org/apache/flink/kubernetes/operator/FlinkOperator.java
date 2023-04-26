@@ -22,14 +22,11 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.plugin.PluginManager;
 import org.apache.flink.core.plugin.PluginUtils;
-import org.apache.flink.kubernetes.operator.api.FlinkDeployment;
-import org.apache.flink.kubernetes.operator.api.FlinkSessionJob;
 import org.apache.flink.kubernetes.operator.api.listener.FlinkResourceListener;
 import org.apache.flink.kubernetes.operator.config.FlinkConfigManager;
 import org.apache.flink.kubernetes.operator.config.KubernetesOperatorConfigOptions;
 import org.apache.flink.kubernetes.operator.controller.FlinkDeploymentController;
 import org.apache.flink.kubernetes.operator.controller.FlinkSessionJobController;
-import org.apache.flink.kubernetes.operator.health.CanaryResourceManager;
 import org.apache.flink.kubernetes.operator.health.HealthProbe;
 import org.apache.flink.kubernetes.operator.health.OperatorHealthService;
 import org.apache.flink.kubernetes.operator.listener.ListenerUtils;
@@ -102,7 +99,7 @@ public class FlinkOperator {
     }
 
     @VisibleForTesting
-    protected Operator createOperator() {
+    Operator createOperator() {
         return new Operator(client, this::overrideOperatorConfigs);
     }
 
@@ -163,9 +160,6 @@ public class FlinkOperator {
                 new ReconcilerFactory(
                         client, configManager, eventRecorder, statusRecorder, autoscalerFactory);
         var observerFactory = new FlinkDeploymentObserverFactory(configManager, eventRecorder);
-        var canaryResourceManager =
-                new CanaryResourceManager<FlinkDeployment>(configManager, client);
-        HealthProbe.INSTANCE.registerCanaryResourceManager(canaryResourceManager);
 
         var controller =
                 new FlinkDeploymentController(
@@ -175,8 +169,7 @@ public class FlinkOperator {
                         reconcilerFactory,
                         observerFactory,
                         statusRecorder,
-                        eventRecorder,
-                        canaryResourceManager);
+                        eventRecorder);
         registeredControllers.add(operator.register(controller, this::overrideControllerConfigs));
     }
 
@@ -186,13 +179,8 @@ public class FlinkOperator {
         var metricManager =
                 MetricManager.createFlinkSessionJobMetricManager(configManager, metricGroup);
         var statusRecorder = StatusRecorder.create(client, metricManager, listeners);
-        var reconciler =
-                new SessionJobReconciler(client, eventRecorder, statusRecorder, configManager);
+        var reconciler = new SessionJobReconciler(client, eventRecorder, statusRecorder);
         var observer = new FlinkSessionJobObserver(configManager, eventRecorder);
-        var canaryResourceManager =
-                new CanaryResourceManager<FlinkSessionJob>(configManager, client);
-        HealthProbe.INSTANCE.registerCanaryResourceManager(canaryResourceManager);
-
         var controller =
                 new FlinkSessionJobController(
                         configManager,
@@ -201,8 +189,7 @@ public class FlinkOperator {
                         reconciler,
                         observer,
                         statusRecorder,
-                        eventRecorder,
-                        canaryResourceManager);
+                        eventRecorder);
         registeredControllers.add(operator.register(controller, this::overrideControllerConfigs));
     }
 

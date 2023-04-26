@@ -172,19 +172,6 @@ public class DefaultValidatorTest {
                         "Periodic savepoints cannot be enabled when config key[%s] is not set",
                         CheckpointingOptions.SAVEPOINT_DIRECTORY.key()));
 
-        testError(
-                dep ->
-                        dep.getSpec()
-                                .setFlinkConfiguration(
-                                        Map.of(
-                                                KubernetesOperatorConfigOptions
-                                                        .OPERATOR_JOB_UPGRADE_LAST_STATE_CHECKPOINT_MAX_AGE
-                                                        .key(),
-                                                "1m")),
-                String.format(
-                        "In order to use max-checkpoint age functionality config key[%s] must be set to allow triggering savepoint upgrades.",
-                        CheckpointingOptions.SAVEPOINT_DIRECTORY.key()));
-
         // Test conf validation
         testSuccess(
                 dep ->
@@ -496,18 +483,6 @@ public class DefaultValidatorTest {
                                     // dependency to 1.16
                                     "kubernetes");
                 });
-
-        testError(
-                dep -> {
-                    dep.getSpec().getJobManager().getResource().setEphemeralStorage("abc");
-                },
-                "JobManager resource ephemeral storage parse error: Character a is neither a decimal digit number, decimal point, nor \"e\" notation exponential mark.");
-
-        testError(
-                dep -> {
-                    dep.getSpec().getTaskManager().getResource().setEphemeralStorage("abc");
-                },
-                "TaskManager resource ephemeral storage parse error: Character a is neither a decimal digit number, decimal point, nor \"e\" notation exponential mark.");
     }
 
     @Test

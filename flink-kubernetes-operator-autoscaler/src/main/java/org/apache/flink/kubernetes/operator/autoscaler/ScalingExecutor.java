@@ -23,7 +23,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.kubernetes.operator.api.AbstractFlinkResource;
-import org.apache.flink.kubernetes.operator.autoscaler.config.AutoScalerOptions;
 import org.apache.flink.kubernetes.operator.autoscaler.metrics.EvaluatedScalingMetric;
 import org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric;
 import org.apache.flink.kubernetes.operator.utils.EventRecorder;
@@ -51,7 +50,9 @@ import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMet
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.TARGET_DATA_RATE;
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.TRUE_PROCESSING_RATE;
 
-/** Class responsible for executing scaling decisions. */
+/**
+ * Class responsible for executing scaling decisions.
+ */
 public class ScalingExecutor {
 
     public static final ConfigOption<Map<String, String>> PARALLELISM_OVERRIDES =
@@ -98,6 +99,7 @@ public class ScalingExecutor {
         }
 
         var scalingHistory = scalingInformation.getScalingHistory();
+        // 计算metrics 汇总信息，产出每个JobVertexID 下的新并行度
         var scalingSummaries =
                 computeScalingSummary(resource, conf, evaluatedMetrics, scalingHistory);
 
@@ -125,6 +127,7 @@ public class ScalingExecutor {
         }
 
         setVertexParallelismOverrides(resource, evaluatedMetrics, scalingSummaries);
+        // 触发扩缩容
         KubernetesClientUtils.applyToStoredCr(
                 kubernetesClient,
                 resource,
@@ -223,30 +226,26 @@ public class ScalingExecutor {
             Map<JobVertexID, SortedMap<Instant, ScalingSummary>> scalingHistory) {
 
         var out = new HashMap<JobVertexID, ScalingSummary>();
-        var excludeVertexIdList = conf.get(AutoScalerOptions.VERTEX_EXCLUDE_IDS);
         evaluatedMetrics.forEach(
                 (v, metrics) -> {
-                    if (excludeVertexIdList.contains(v.toHexString())) {
-                        LOG.info(
-                                "Vertex {} is part of `vertex.exclude.ids` config, Ignoring it for scaling",
-                                v);
-                    } else {
-                        var currentParallelism =
-                                (int) metrics.get(ScalingMetric.PARALLELISM).getCurrent();
-                        var newParallelism =
-                                jobVertexScaler.computeScaleTargetParallelism(
-                                        resource,
-                                        conf,
-                                        v,
-                                        metrics,
-                                        scalingHistory.getOrDefault(
-                                                v, Collections.emptySortedMap()));
-                        if (currentParallelism != newParallelism) {
-                            out.put(
+                    // 当前并行度
+                    var currentParallelism =
+                            (int) metrics.get(ScalingMetric.PARALLELISM).getCurrent();
+                    // 新并行度
+                    var newParallelism =
+                            jobVertexScaler.computeScaleTargetParallelism(
+                                    // job resource
+                                    resource,
+                                    // job 配置
+                                    conf,
+                                    // JobVertexID
                                     v,
-                                    new ScalingSummary(
-                                            currentParallelism, newParallelism, metrics));
-                        }
+                                    // metrics 信息
+                                    metrics,
+                                    // scaling 历史
+                                    scalingHistory.getOrDefault(v, Collections.emptySortedMap()));
+                    if (currentParallelism != newParallelism) {
+                        out.put(v, new ScalingSummary(currentParallelism, newParallelism, metrics));
                     }
                 });
 

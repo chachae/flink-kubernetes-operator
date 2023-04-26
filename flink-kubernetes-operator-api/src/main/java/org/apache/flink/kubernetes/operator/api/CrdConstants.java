@@ -25,6 +25,4 @@ public class CrdConstants {
     public static final String KIND_FLINK_DEPLOYMENT = "FlinkDeployment";
 
     public static final String LABEL_TARGET_SESSION = "target.session";
-
-    public static final String EPHEMERAL_STORAGE = "ephemeral-storage";
 }

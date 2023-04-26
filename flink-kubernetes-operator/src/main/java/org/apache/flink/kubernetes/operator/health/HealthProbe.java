@@ -19,12 +19,11 @@ package org.apache.flink.kubernetes.operator.health;
 
 import io.javaoperatorsdk.operator.RuntimeInfo;
 import lombok.Getter;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Flink operator health probe. */
 public enum HealthProbe {
@@ -32,64 +31,28 @@ public enum HealthProbe {
 
     private static final Logger LOG = LoggerFactory.getLogger(HealthProbe.class);
 
-    @Getter private RuntimeInfo runtimeInfo;
+    private final AtomicBoolean isHealthy = new AtomicBoolean(true);
 
-    private InformerHealthSummary previousInformerHealthSummary;
+    @Setter @Getter private RuntimeInfo runtimeInfo;
 
-    private final List<CanaryResourceManager<?>> canaryResourceManagers = new ArrayList<>();
-
-    public void registerCanaryResourceManager(CanaryResourceManager<?> canaryResourceManager) {
-        canaryResourceManagers.add(canaryResourceManager);
-    }
-
-    public void setRuntimeInfo(RuntimeInfo runtimeInfo) {
-        this.runtimeInfo = runtimeInfo;
-        previousInformerHealthSummary = InformerHealthSummary.fromRuntimeInfo(runtimeInfo);
-        LOG.info(
-                "Initially unhealthy informers: {}",
-                previousInformerHealthSummary.getUnhealthyInformers());
+    public void markUnhealthy() {
+        isHealthy.set(false);
     }
 
     public boolean isHealthy() {
+        if (!isHealthy.get()) {
+            return false;
+        }
+
         if (runtimeInfo != null) {
-            LOG.debug("Checking event source health");
-            var healthSummary = InformerHealthSummary.fromRuntimeInfo(runtimeInfo);
-            if (!healthSummary.isAnyHealthy()) {
-                LOG.error("All informers are unhealthy");
-                return false;
-            } else if (anyInformerBecameUnhealthy(healthSummary.getUnhealthyInformers())) {
-                return false;
+            LOG.debug("Checking operator health");
+            if (runtimeInfo.allEventSourcesAreHealthy()) {
+                return runtimeInfo.isStarted();
             } else {
-                previousInformerHealthSummary = healthSummary;
-            }
-
-            if (!runtimeInfo.isStarted()) {
-                LOG.error("Operator is not running");
+                LOG.error("Unhealthy event sources: {}", runtimeInfo.unhealthyEventSources());
                 return false;
             }
         }
-
-        for (CanaryResourceManager<?> canaryResourceManager : canaryResourceManagers) {
-            if (!canaryResourceManager.allCanariesHealthy()) {
-                LOG.error("Unhealthy canary resources");
-                return false;
-            }
-        }
-
         return true;
-    }
-
-    private boolean anyInformerBecameUnhealthy(Set<InformerIdentifier> unhealthyInformers) {
-        boolean unhealthy = false;
-        for (InformerIdentifier unhealthyInformer : unhealthyInformers) {
-            if (!previousInformerHealthSummary
-                    .getUnhealthyInformers()
-                    .contains(unhealthyInformer)) {
-                LOG.error("Informer became unhealthy: {}", unhealthyInformer);
-                unhealthy = true;
-            }
-        }
-
-        return unhealthy;
     }
 }

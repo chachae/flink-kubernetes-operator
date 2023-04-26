@@ -9,12 +9,6 @@
     </thead>
     <tbody>
         <tr>
-            <td><h5>kubernetes.operator.job.autoscaler.backlog-processing.lag-threshold</h5></td>
-            <td style="word-wrap: break-word;">5 min</td>
-            <td>Duration</td>
-            <td>Lag threshold which will prevent unnecessary scalings while removing the pending messages responsible for the lag.</td>
-        </tr>
-        <tr>
             <td><h5>kubernetes.operator.job.autoscaler.catch-up.duration</h5></td>
             <td style="word-wrap: break-word;">10 min</td>
             <td>Duration</td>
@@ -87,6 +81,12 @@
             <td>Enable vertex scaling execution by the autoscaler. If disabled, the autoscaler will only collect metrics and evaluate the suggested parallelism for each vertex but will not upgrade the jobs.</td>
         </tr>
         <tr>
+            <td><h5>kubernetes.operator.job.autoscaler.scaling.sources.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable scaling source vertices. Source vertices set the baseline ingestion rate for the processing based on the backlog size. If disabled, only regular job vertices will be scaled and source vertices will be unchanged.</td>
+        </tr>
+        <tr>
             <td><h5>kubernetes.operator.job.autoscaler.stabilization.interval</h5></td>
             <td style="word-wrap: break-word;">5 min</td>
             <td>Duration</td>
@@ -103,12 +103,6 @@
             <td style="word-wrap: break-word;">0.1</td>
             <td>Double</td>
             <td>Target vertex utilization boundary. Scaling won't be performed if utilization is within (target - boundary, target + boundary)</td>
-        </tr>
-        <tr>
-            <td><h5>kubernetes.operator.job.autoscaler.vertex.exclude.ids</h5></td>
-            <td style="word-wrap: break-word;"></td>
-            <td>List&lt;String&gt;</td>
-            <td>A (semicolon-separated) list of vertex ids in hexstring for which to disable scaling. Caution: For non-sink vertices this will still scale their downstream operators until https://issues.apache.org/jira/browse/FLINK-31215 is implemented.</td>
         </tr>
         <tr>
             <td><h5>kubernetes.operator.job.autoscaler.vertex.max-parallelism</h5></td>

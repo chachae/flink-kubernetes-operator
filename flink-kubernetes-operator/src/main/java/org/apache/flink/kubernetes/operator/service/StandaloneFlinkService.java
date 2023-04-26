@@ -38,7 +38,6 @@ import org.apache.flink.kubernetes.operator.standalone.StandaloneKubernetesConfi
 import org.apache.flink.kubernetes.operator.utils.StandaloneKubernetesUtils;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
-import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -130,10 +129,7 @@ public class StandaloneFlinkService extends AbstractFlinkService {
 
     @Override
     protected void deleteClusterInternal(
-            ObjectMeta meta,
-            Configuration conf,
-            boolean deleteHaData,
-            DeletionPropagation deletionPropagation) {
+            ObjectMeta meta, Configuration conf, boolean deleteHaData) {
         final String clusterId = meta.getName();
         final String namespace = meta.getNamespace();
 
@@ -143,7 +139,6 @@ public class StandaloneFlinkService extends AbstractFlinkService {
                 .deployments()
                 .inNamespace(namespace)
                 .withName(StandaloneKubernetesUtils.getJobManagerDeploymentName(clusterId))
-                .withPropagationPolicy(deletionPropagation)
                 .delete();
 
         LOG.info("Deleting Flink Standalone cluster TM resources");
@@ -152,7 +147,6 @@ public class StandaloneFlinkService extends AbstractFlinkService {
                 .deployments()
                 .inNamespace(namespace)
                 .withName(StandaloneKubernetesUtils.getTaskManagerDeploymentName(clusterId))
-                .withPropagationPolicy(deletionPropagation)
                 .delete();
         if (deleteHaData) {
             deleteHAData(namespace, clusterId, conf);

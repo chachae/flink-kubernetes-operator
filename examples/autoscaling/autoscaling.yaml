@@ -25,6 +25,7 @@ spec:
   flinkVersion: v1_17
   flinkConfiguration:
     kubernetes.operator.job.autoscaler.enabled: "true"
+    kubernetes.operator.job.autoscaler.scaling.sources.enabled: "false"
     kubernetes.operator.job.autoscaler.stabilization.interval: "1m"
     kubernetes.operator.job.autoscaler.metrics.window: "3m"
     pipeline.max-parallelism: "24"
@@ -52,8 +53,6 @@ spec:
               name: flink-volume
       volumes:
         - name: flink-volume
-          # Flink is designed to run as a specific user with restricted privileges.
-          # The owner of the host path should be set to "flink" with the user ID (UID) of 9999.
           hostPath:
             path: /tmp/flink
             type: Directory

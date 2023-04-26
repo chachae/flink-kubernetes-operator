@@ -25,7 +25,6 @@ import org.apache.flink.kubernetes.operator.config.FlinkConfigManager;
 import org.apache.flink.kubernetes.operator.exception.DeploymentFailedException;
 import org.apache.flink.kubernetes.operator.exception.ReconciliationException;
 import org.apache.flink.kubernetes.operator.exception.RecoveryFailureException;
-import org.apache.flink.kubernetes.operator.health.CanaryResourceManager;
 import org.apache.flink.kubernetes.operator.observer.deployment.FlinkDeploymentObserverFactory;
 import org.apache.flink.kubernetes.operator.reconciler.ReconciliationUtils;
 import org.apache.flink.kubernetes.operator.reconciler.deployment.ReconcilerFactory;
@@ -70,7 +69,6 @@ public class FlinkDeploymentController
     private final FlinkDeploymentObserverFactory observerFactory;
     private final StatusRecorder<FlinkDeployment, FlinkDeploymentStatus> statusRecorder;
     private final EventRecorder eventRecorder;
-    private final CanaryResourceManager<FlinkDeployment> canaryResourceManager;
 
     public FlinkDeploymentController(
             FlinkConfigManager configManager,
@@ -79,8 +77,7 @@ public class FlinkDeploymentController
             ReconcilerFactory reconcilerFactory,
             FlinkDeploymentObserverFactory observerFactory,
             StatusRecorder<FlinkDeployment, FlinkDeploymentStatus> statusRecorder,
-            EventRecorder eventRecorder,
-            CanaryResourceManager<FlinkDeployment> canaryResourceManager) {
+            EventRecorder eventRecorder) {
         this.configManager = configManager;
         this.validators = validators;
         this.ctxFactory = ctxFactory;
@@ -88,15 +85,10 @@ public class FlinkDeploymentController
         this.observerFactory = observerFactory;
         this.statusRecorder = statusRecorder;
         this.eventRecorder = eventRecorder;
-        this.canaryResourceManager = canaryResourceManager;
     }
 
     @Override
     public DeleteControl cleanup(FlinkDeployment flinkApp, Context josdkContext) {
-        if (canaryResourceManager.handleCanaryResourceDeletion(flinkApp)) {
-            return DeleteControl.defaultDelete();
-        }
-
         String msg = "Cleaning up " + FlinkDeployment.class.getSimpleName();
         LOG.info(msg);
         eventRecorder.triggerEvent(
@@ -120,12 +112,7 @@ public class FlinkDeploymentController
     public UpdateControl<FlinkDeployment> reconcile(FlinkDeployment flinkApp, Context josdkContext)
             throws Exception {
 
-        if (canaryResourceManager.handleCanaryResourceReconciliation(flinkApp)) {
-            return UpdateControl.noUpdate();
-        }
-
         LOG.info("Starting reconciliation");
-
         statusRecorder.updateStatusFromCache(flinkApp);
         FlinkDeployment previousDeployment = ReconciliationUtils.clone(flinkApp);
         var ctx = ctxFactory.getResourceContext(flinkApp, josdkContext);
@@ -140,6 +127,7 @@ public class FlinkDeploymentController
                         false);
             }
             statusRecorder.patchAndCacheStatus(flinkApp);
+            // 触发reconcile
             reconcilerFactory.getOrCreate(flinkApp).reconcile(ctx);
         } catch (RecoveryFailureException rfe) {
             handleRecoveryFailed(flinkApp, rfe);

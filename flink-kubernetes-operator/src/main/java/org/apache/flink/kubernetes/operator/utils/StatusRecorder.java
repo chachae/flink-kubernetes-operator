@@ -120,7 +120,7 @@ public class StatusRecorder<
         int retries = 0;
         while (true) {
             try {
-                var updated = client.resource(resource).lockResourceVersion().updateStatus();
+                var updated = client.resource(resource).lockResourceVersion().replaceStatus();
 
                 // If we successfully replaced the status, update the resource version so we know
                 // what to lock next in the same reconciliation loop
@@ -135,7 +135,7 @@ public class StatusRecorder<
                             "Could not apply status update for resource version {}",
                             currentVersion);
 
-                    var latest = client.resource(resource).get();
+                    var latest = client.resource(resource).fromServer().get();
                     var latestVersion = latest.getMetadata().getResourceVersion();
 
                     if (latestVersion.equals(currentVersion)) {

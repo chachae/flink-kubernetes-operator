@@ -27,9 +27,18 @@ import java.util.Map;
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.CATCH_UP_DATA_RATE;
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.TARGET_DATA_RATE;
 
-/** AutoScaler utilities. */
+/**
+ * AutoScaler utilities.
+ */
 public class AutoScalerUtils {
 
+    /**
+     * @param evaluatedMetrics  job 采集到的所有指标
+     * @param conf              配置
+     * @param targetUtilization 目标利用率
+     * @param withRestart       是否重启
+     * @return
+     */
     public static double getTargetProcessingCapacity(
             Map<ScalingMetric, EvaluatedScalingMetric> evaluatedMetrics,
             Configuration conf,
@@ -48,7 +57,7 @@ public class AutoScalerUtils {
         double restartTimeSec = conf.get(AutoScalerOptions.RESTART_TIME).toSeconds();
 
         targetUtilization = Math.max(0., targetUtilization);
-        targetUtilization = Math.min(1., targetUtilization);
+        targetUtilization = Math.min(1, targetUtilization);
 
         double avgInputTargetRate = evaluatedMetrics.get(TARGET_DATA_RATE).getAverage();
         if (Double.isNaN(avgInputTargetRate)) {

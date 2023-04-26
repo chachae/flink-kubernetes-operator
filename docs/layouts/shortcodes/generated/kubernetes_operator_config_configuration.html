@@ -117,12 +117,6 @@
             <td>The timeout for the observer to wait the flink rest client to return.</td>
         </tr>
         <tr>
-            <td><h5>kubernetes.operator.health.canary.resource.timeout</h5></td>
-            <td style="word-wrap: break-word;">1 min</td>
-            <td>Duration</td>
-            <td>Allowed max time between spec update and reconciliation for canary resources.</td>
-        </tr>
-        <tr>
             <td><h5>kubernetes.operator.health.probe.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
@@ -163,12 +157,6 @@
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Enables last-state fallback for savepoint upgrade mode. When the job is not running thus savepoint cannot be triggered but HA metadata is available for last state restore the operator can initiate the upgrade process when the flag is enabled.</td>
-        </tr>
-        <tr>
-            <td><h5>kubernetes.operator.job.upgrade.last-state.max.allowed.checkpoint.age</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Duration</td>
-            <td>Max allowed checkpoint age for initiating last-state upgrades on running jobs. If a checkpoint is not available within the desired age (and nothing in progress) a savepoint will be triggered.</td>
         </tr>
         <tr>
             <td><h5>kubernetes.operator.label.selector</h5></td>
@@ -225,12 +213,6 @@
             <td>Interval at which periodic savepoints will be triggered. The triggering schedule is not guaranteed, savepoints will be triggered as part of the regular reconcile loop.</td>
         </tr>
         <tr>
-            <td><h5>kubernetes.operator.pod-template.merge-arrays-by-name</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Configure the array merge behaviour during pod merging. Arrays can be either merged by position or name matching.</td>
-        </tr>
-        <tr>
             <td><h5>kubernetes.operator.reconcile.interval</h5></td>
             <td style="word-wrap: break-word;">1 min</td>
             <td>Duration</td>
@@ -247,12 +229,6 @@
             <td style="word-wrap: break-word;">1 min</td>
             <td>Duration</td>
             <td>The timeout for the resource clean up to wait for flink to shutdown cluster.</td>
-        </tr>
-        <tr>
-            <td><h5>kubernetes.operator.resource.deletion.propagation</h5></td>
-            <td style="word-wrap: break-word;">Foreground</td>
-            <td><p>Enum</p></td>
-            <td>JM/TM Deployment deletion propagation.<br /><br />Possible values:<ul><li>"Orphan"</li><li>"Background"</li><li>"Foreground"</li></ul></td>
         </tr>
         <tr>
             <td><h5>kubernetes.operator.retry.initial.interval</h5></td>

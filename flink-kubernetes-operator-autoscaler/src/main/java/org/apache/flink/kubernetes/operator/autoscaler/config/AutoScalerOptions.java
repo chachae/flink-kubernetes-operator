@@ -22,7 +22,6 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.kubernetes.operator.autoscaler.metrics.MetricAggregator;
 
 import java.time.Duration;
-import java.util.List;
 
 import static org.apache.flink.kubernetes.operator.config.KubernetesOperatorConfigOptions.operatorConfig;
 
@@ -52,12 +51,24 @@ public class AutoScalerOptions {
                     .defaultValue(Duration.ofMinutes(5))
                     .withDescription("Scaling metrics aggregation window size.");
 
+    /**
+     * 不执行新扩展的稳定期，（意思就是：这段时间内，我不做任何scaling 的操作）
+     */
     public static final ConfigOption<Duration> STABILIZATION_INTERVAL =
             autoScalerConfig("stabilization.interval")
                     .durationType()
                     .defaultValue(Duration.ofMinutes(5))
                     .withDescription(
                             "Stabilization period in which no new scaling will be executed");
+
+    public static final ConfigOption<Boolean> SOURCE_SCALING_ENABLED =
+            autoScalerConfig("scaling.sources.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable scaling source vertices. "
+                                    + "Source vertices set the baseline ingestion rate for the processing based on the backlog size. "
+                                    + "If disabled, only regular job vertices will be scaled and source vertices will be unchanged.");
 
     public static final ConfigOption<Double> TARGET_UTILIZATION =
             autoScalerConfig("target.utilization")
@@ -112,13 +123,6 @@ public class AutoScalerOptions {
                     .withDescription(
                             "Expected restart time to be used until the operator can determine it reliably from history.");
 
-    public static final ConfigOption<Duration> BACKLOG_PROCESSING_LAG_THRESHOLD =
-            autoScalerConfig("backlog-processing.lag-threshold")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(5))
-                    .withDescription(
-                            "Lag threshold which will prevent unnecessary scalings while removing the pending messages responsible for the lag.");
-
     public static final ConfigOption<Boolean> SCALING_EFFECTIVENESS_DETECTION_ENABLED =
             autoScalerConfig("scaling.effectiveness.detection.enabled")
                     .booleanType()
@@ -152,12 +156,4 @@ public class AutoScalerOptions {
                     .defaultValue(MetricAggregator.MAX)
                     .withDescription(
                             "Metric aggregator to use for busyTime metrics. This affects how true processing/output rate will be computed. Using max allows us to handle jobs with data skew more robustly, while avg may provide better stability when we know that the load distribution is even.");
-
-    public static final ConfigOption<List<String>> VERTEX_EXCLUDE_IDS =
-            autoScalerConfig("vertex.exclude.ids")
-                    .stringType()
-                    .asList()
-                    .defaultValues()
-                    .withDescription(
-                            "A (semicolon-separated) list of vertex ids in hexstring for which to disable scaling. Caution: For non-sink vertices this will still scale their downstream operators until https://issues.apache.org/jira/browse/FLINK-31215 is implemented.");
 }

@@ -47,7 +47,9 @@ import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMet
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.PARALLELISM;
 import static org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric.TRUE_PROCESSING_RATE;
 
-/** Component responsible for computing vertex parallelism based on the scaling metrics. */
+/**
+ * Component responsible for computing vertex parallelism based on the scaling metrics.
+ */
 public class JobVertexScaler {
 
     private static final Logger LOG = LoggerFactory.getLogger(JobVertexScaler.class);
@@ -64,6 +66,14 @@ public class JobVertexScaler {
         this.eventRecorder = eventRecorder;
     }
 
+    /**
+     * @param resource         job resource
+     * @param conf             job 配置
+     * @param vertex           JobVertexID
+     * @param evaluatedMetrics metrics 信息
+     * @param history          scaling 历史
+     * @return
+     */
     public int computeScaleTargetParallelism(
             AbstractFlinkResource<?, ?> resource,
             Configuration conf,
@@ -71,8 +81,11 @@ public class JobVertexScaler {
             Map<ScalingMetric, EvaluatedScalingMetric> evaluatedMetrics,
             SortedMap<Instant, ScalingSummary> history) {
 
+        // 当前并行度
         var currentParallelism = (int) evaluatedMetrics.get(PARALLELISM).getCurrent();
+        // 平均负荷处理速率（记录/秒）
         double averageTrueProcessingRate = evaluatedMetrics.get(TRUE_PROCESSING_RATE).getAverage();
+        // 没有的话直接直接返回原并行度
         if (Double.isNaN(averageTrueProcessingRate)) {
             LOG.warn(
                     "True processing rate is not available for {}, cannot compute new parallelism",
@@ -80,8 +93,10 @@ public class JobVertexScaler {
             return currentParallelism;
         }
 
+        // 获取利用率
         double targetCapacity =
                 AutoScalerUtils.getTargetProcessingCapacity(
+                        // TARGET_UTILIZATION：目标利用率
                         evaluatedMetrics, conf, conf.get(TARGET_UTILIZATION), true);
         if (Double.isNaN(targetCapacity)) {
             LOG.warn(
@@ -112,13 +127,13 @@ public class JobVertexScaler {
 
         if (newParallelism == currentParallelism
                 || blockScalingBasedOnPastActions(
-                        resource,
-                        vertex,
-                        conf,
-                        evaluatedMetrics,
-                        history,
-                        currentParallelism,
-                        newParallelism)) {
+                resource,
+                vertex,
+                conf,
+                evaluatedMetrics,
+                history,
+                currentParallelism,
+                newParallelism)) {
             return currentParallelism;
         }
 
@@ -207,11 +222,7 @@ public class JobVertexScaler {
                 message);
 
         if (conf.get(AutoScalerOptions.SCALING_EFFECTIVENESS_DETECTION_ENABLED)) {
-            LOG.info(
-                    "Ineffective scaling detected for {}, expected increase {}, actual {}",
-                    vertex,
-                    expectedIncrease,
-                    actualIncrease);
+            LOG.info(message);
             return true;
         } else {
             return false;

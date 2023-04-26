@@ -52,10 +52,10 @@ public class Basic {
         flinkDeployment.setSpec(flinkDeploymentSpec);
         flinkDeploymentSpec.setServiceAccount("flink");
         JobManagerSpec jobManagerSpec = new JobManagerSpec();
-        jobManagerSpec.setResource(new Resource(1.0, "2048m", "2G"));
+        jobManagerSpec.setResource(new Resource(1.0, "2048m"));
         flinkDeploymentSpec.setJobManager(jobManagerSpec);
         TaskManagerSpec taskManagerSpec = new TaskManagerSpec();
-        taskManagerSpec.setResource(new Resource(1.0, "2048m", "2G"));
+        taskManagerSpec.setResource(new Resource(1.0, "2048m"));
         flinkDeploymentSpec.setTaskManager(taskManagerSpec);
         flinkDeployment
                 .getSpec()

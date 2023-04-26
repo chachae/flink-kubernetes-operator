@@ -47,8 +47,6 @@ import org.apache.flink.runtime.jobmanager.HighAvailabilityMode;
 import org.apache.flink.runtime.jobmanager.JobManagerProcessUtils;
 import org.apache.flink.util.StringUtils;
 
-import io.fabric8.kubernetes.api.model.Quantity;
-
 import javax.annotation.Nullable;
 
 import java.util.Map;
@@ -57,15 +55,17 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Default validator implementation for {@link FlinkDeployment}. */
+/**
+ * Default validator implementation for {@link FlinkDeployment}.
+ */
 public class DefaultValidator implements FlinkResourceValidator {
     private static final Pattern DEPLOYMENT_NAME_PATTERN =
             Pattern.compile("[a-z]([-a-z\\d]{0,43}[a-z\\d])?");
     private static final String[] FORBIDDEN_CONF_KEYS =
-            new String[] {
-                KubernetesConfigOptions.NAMESPACE.key(),
-                KubernetesConfigOptions.CLUSTER_ID.key(),
-                HighAvailabilityOptions.HA_CLUSTER_ID.key()
+            new String[]{
+                    KubernetesConfigOptions.NAMESPACE.key(),
+                    KubernetesConfigOptions.CLUSTER_ID.key(),
+                    HighAvailabilityOptions.HA_CLUSTER_ID.key()
             };
 
     private static final Set<String> ALLOWED_LOG_CONF_KEYS =
@@ -180,15 +180,15 @@ public class DefaultValidator implements FlinkResourceValidator {
 
         if (conf.get(KubernetesOperatorConfigOptions.OPERATOR_CLUSTER_HEALTH_CHECK_ENABLED)
                 && !conf.get(
-                        KubernetesOperatorConfigOptions.OPERATOR_JM_DEPLOYMENT_RECOVERY_ENABLED)) {
+                KubernetesOperatorConfigOptions.OPERATOR_JM_DEPLOYMENT_RECOVERY_ENABLED)) {
             return Optional.of(
                     "Deployment recovery ("
                             + KubernetesOperatorConfigOptions
-                                    .OPERATOR_JM_DEPLOYMENT_RECOVERY_ENABLED
-                                    .key()
+                            .OPERATOR_JM_DEPLOYMENT_RECOVERY_ENABLED
+                            .key()
                             + ") must be enabled for job health check ("
                             + KubernetesOperatorConfigOptions.OPERATOR_CLUSTER_HEALTH_CHECK_ENABLED
-                                    .key()
+                            .key()
                             + ") support.");
         }
 
@@ -210,6 +210,14 @@ public class DefaultValidator implements FlinkResourceValidator {
         return Optional.empty();
     }
 
+    /**
+     * 校验作业spec
+     *
+     * @param job
+     * @param tm
+     * @param confMap
+     * @return
+     */
     private Optional<String> validateJobSpec(
             JobSpec job, @Nullable TaskManagerSpec tm, Map<String, String> confMap) {
         if (job == null) {
@@ -217,6 +225,7 @@ public class DefaultValidator implements FlinkResourceValidator {
         }
 
         Configuration configuration = Configuration.fromMap(confMap);
+        // 设置最近一次状态启动需要开启HA
         if (job.getUpgradeMode() == UpgradeMode.LAST_STATE
                 && !HighAvailabilityMode.isHighAvailabilityModeActivated(configuration)) {
             return Optional.of("Job could not be upgraded with last-state while HA disabled");
@@ -249,14 +258,6 @@ public class DefaultValidator implements FlinkResourceValidator {
                 return Optional.of(
                         String.format(
                                 "Periodic savepoints cannot be enabled when config key[%s] is not set",
-                                CheckpointingOptions.SAVEPOINT_DIRECTORY.key()));
-            } else if (configuration.get(
-                            KubernetesOperatorConfigOptions
-                                    .OPERATOR_JOB_UPGRADE_LAST_STATE_CHECKPOINT_MAX_AGE)
-                    != null) {
-                return Optional.of(
-                        String.format(
-                                "In order to use max-checkpoint age functionality config key[%s] must be set to allow triggering savepoint upgrades.",
                                 CheckpointingOptions.SAVEPOINT_DIRECTORY.key()));
             }
         }
@@ -308,7 +309,7 @@ public class DefaultValidator implements FlinkResourceValidator {
             return Optional.of("JobManager replicas should not be configured less than one.");
         } else if (replicas > 1
                 && !HighAvailabilityMode.isHighAvailabilityModeActivated(
-                        Configuration.fromMap(confMap))) {
+                Configuration.fromMap(confMap))) {
             return Optional.of(
                     "High availability should be enabled when starting standby JobManagers.");
         }
@@ -358,30 +359,14 @@ public class DefaultValidator implements FlinkResourceValidator {
         }
 
         String memory = resource.getMemory();
-        String storage = resource.getEphemeralStorage();
-        StringBuilder builder = new StringBuilder();
-
-        if (memory != null) {
-            try {
-                MemorySize.parse(memory);
-            } catch (IllegalArgumentException iae) {
-                builder.append(component + " resource memory parse error: " + iae.getMessage());
-            }
+        if (memory == null) {
+            return Optional.empty();
         }
 
-        if (storage != null) {
-            try {
-                Quantity quantity = Quantity.parse(storage);
-                Quantity.getAmountInBytes(quantity);
-            } catch (IllegalArgumentException iae) {
-                builder.append(
-                        component + " resource ephemeral storage parse error: " + iae.getMessage());
-            }
-        }
-
-        String errorMessage = builder.toString();
-        if (!StringUtils.isNullOrWhitespaceOnly(errorMessage)) {
-            return Optional.of(errorMessage);
+        try {
+            MemorySize.parse(memory);
+        } catch (IllegalArgumentException iae) {
+            return Optional.of(component + " resource memory parse error: " + iae.getMessage());
         }
 
         return Optional.empty();
@@ -432,11 +417,11 @@ public class DefaultValidator implements FlinkResourceValidator {
         JobSpec newJob = newSpec.getJob();
         if (oldJob != null && newJob != null) {
             if (StringUtils.isNullOrWhitespaceOnly(
-                            effectiveConfig.get(CheckpointingOptions.SAVEPOINT_DIRECTORY.key()))
+                    effectiveConfig.get(CheckpointingOptions.SAVEPOINT_DIRECTORY.key()))
                     && deployment.getStatus().getJobManagerDeploymentStatus()
-                            != JobManagerDeploymentStatus.MISSING
+                    != JobManagerDeploymentStatus.MISSING
                     && ReconciliationUtils.isUpgradeModeChangedToLastStateAndHADisabledPreviously(
-                            deployment, configManager.getObserveConfig(deployment))) {
+                    deployment, configManager.getObserveConfig(deployment))) {
                 return Optional.of(
                         String.format(
                                 "Job could not be upgraded to last-state while config key[%s] is not set",

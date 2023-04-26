@@ -39,7 +39,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.flink.kubernetes.operator.autoscaler.config.AutoScalerOptions.AUTOSCALER_ENABLED;
 
-/** Application and SessionJob autoscaler. */
+/**
+ * Application and SessionJob autoscaler.
+ */
 public class JobAutoScalerImpl implements JobAutoScaler {
 
     private static final Logger LOG = LoggerFactory.getLogger(JobAutoScalerImpl.class);
@@ -99,18 +101,17 @@ public class JobAutoScalerImpl implements JobAutoScaler {
                             resource, autoScalerInfo, ctx.getFlinkService(), conf);
 
             if (collectedMetrics.getMetricHistory().isEmpty()) {
-                autoScalerInfo.replaceInKubernetes(kubernetesClient);
                 return false;
             }
 
             LOG.debug("Evaluating scaling metrics for {}", collectedMetrics);
+            // evaluator scaling metrics
             var evaluatedMetrics = evaluator.evaluate(conf, collectedMetrics);
             LOG.debug("Scaling metrics evaluated: {}", evaluatedMetrics);
             lastEvaluatedMetrics.put(ResourceID.fromResource(resource), evaluatedMetrics);
             registerResourceScalingMetrics(resource, ctx.getResourceMetricGroup());
 
-            var specAdjusted =
-                    scalingExecutor.scaleResource(resource, autoScalerInfo, conf, evaluatedMetrics);
+            var specAdjusted = scalingExecutor.scaleResource(resource, autoScalerInfo, conf, evaluatedMetrics);
             autoScalerInfo.replaceInKubernetes(kubernetesClient);
             return specAdjusted;
         } catch (Exception e) {

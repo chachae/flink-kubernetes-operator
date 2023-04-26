@@ -127,8 +127,9 @@ public abstract class AbstractFlinkResourceReconciler<
                 cr.getStatus().getReconciliationStatus().deserializeLastReconciledSpec();
         SPEC currentDeploySpec = cr.getSpec();
 
-        var specDiff = new ReflectiveDiffBuilder<>(lastReconciledSpec, currentDeploySpec).build();
+        var specDiff = new ReflectiveDiffBuilder<>(currentDeploySpec, lastReconciledSpec).build();
 
+        //
         boolean specChanged =
                 DiffType.IGNORE != specDiff.getType()
                         || reconciliationStatus.getState() == ReconciliationState.UPGRADING;
@@ -428,10 +429,7 @@ public abstract class AbstractFlinkResourceReconciler<
 
             if (jmMissingForRunningDeployment(deployment)) {
                 LOG.debug("Jobmanager deployment is missing, trying to recover");
-                var jobSpec = deployment.getSpec().getJob();
-                boolean stateless =
-                        jobSpec != null && jobSpec.getUpgradeMode() == UpgradeMode.STATELESS;
-                if (stateless || HighAvailabilityMode.isHighAvailabilityModeActivated(conf)) {
+                if (HighAvailabilityMode.isHighAvailabilityModeActivated(conf)) {
                     LOG.debug("HA is enabled, recovering lost jobmanager deployment");
                     result = true;
                 } else {
@@ -465,7 +463,7 @@ public abstract class AbstractFlinkResourceReconciler<
                         "kind", owner.getKind(),
                         "name", owner.getMetadata().getName(),
                         "uid", owner.getMetadata().getUid(),
-                        "blockOwnerDeletion", "true",
+                        "blockOwnerDeletion", "false",
                         "controller", "false");
         deployConfig.set(
                 KubernetesConfigOptions.JOB_MANAGER_OWNER_REFERENCE, List.of(ownerReference));

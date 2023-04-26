@@ -59,7 +59,6 @@ rbac:
     name: "flink-role-binding"
 
 operatorPod:
-  priorityClassName: null
   annotations: {}
   labels: {}
   env:
@@ -73,9 +72,6 @@ operatorPod:
   # Node tolerations for operator pod assignment
   # https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
   tolerations: []
-  # Topology spread constrains
-  # https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/
-  topologySpreadConstraints: []
   resources: {}
   # resources:
   #   limits:

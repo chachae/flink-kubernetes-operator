@@ -22,10 +22,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.TaskManagerOptions;
-import org.apache.flink.kubernetes.KubernetesClusterClientFactory;
 import org.apache.flink.kubernetes.configuration.KubernetesConfigOptions;
 import org.apache.flink.kubernetes.highavailability.KubernetesHaServicesFactory;
-import org.apache.flink.kubernetes.kubeclient.parameters.KubernetesJobManagerParameters;
 import org.apache.flink.kubernetes.operator.api.spec.FlinkDeploymentSpec;
 import org.apache.flink.kubernetes.operator.api.spec.FlinkVersion;
 import org.apache.flink.kubernetes.utils.Constants;
@@ -52,7 +50,6 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -66,7 +63,7 @@ public class FlinkUtils {
 
     public static final String CR_GENERATION_LABEL = "flinkdeployment.flink.apache.org/generation";
 
-    public static Pod mergePodTemplates(Pod toPod, Pod fromPod, boolean mergeArraysByName) {
+    public static Pod mergePodTemplates(Pod toPod, Pod fromPod) {
         if (fromPod == null) {
             return toPod;
         } else if (toPod == null) {
@@ -74,7 +71,7 @@ public class FlinkUtils {
         }
         JsonNode node1 = MAPPER.valueToTree(toPod);
         JsonNode node2 = MAPPER.valueToTree(fromPod);
-        mergeInto(node1, node2, mergeArraysByName);
+        mergeInto(node1, node2);
         try {
             return MAPPER.treeToValue(node1, Pod.class);
         } catch (Exception ex) {
@@ -82,7 +79,7 @@ public class FlinkUtils {
         }
     }
 
-    private static void mergeInto(JsonNode toNode, JsonNode fromNode, boolean mergeArraysByName) {
+    private static void mergeInto(JsonNode toNode, JsonNode fromNode) {
         Iterator<String> fieldNames = fromNode.fieldNames();
         while (fieldNames.hasNext()) {
             String fieldName = fieldNames.next();
@@ -90,63 +87,23 @@ public class FlinkUtils {
             JsonNode fromChildNode = fromNode.get(fieldName);
 
             if (toChildNode != null && toChildNode.isArray() && fromChildNode.isArray()) {
-                mergeArray((ArrayNode) toChildNode, (ArrayNode) fromChildNode, mergeArraysByName);
+                // TODO: does merging arrays even make sense or should it just override?
+                for (int i = 0; i < fromChildNode.size(); i++) {
+                    JsonNode updatedChildNode = fromChildNode.get(i);
+                    if (toChildNode.size() <= i) {
+                        // append new node
+                        ((ArrayNode) toChildNode).add(updatedChildNode);
+                    }
+                    mergeInto(toChildNode.get(i), updatedChildNode);
+                }
             } else if (toChildNode != null && toChildNode.isObject()) {
-                mergeInto(toChildNode, fromChildNode, mergeArraysByName);
+                mergeInto(toChildNode, fromChildNode);
             } else {
                 if (toNode instanceof ObjectNode) {
                     ((ObjectNode) toNode).replace(fieldName, fromChildNode);
                 }
             }
         }
-    }
-
-    private static void mergeArray(
-            ArrayNode toChildNode, ArrayNode fromChildNode, boolean mergeArraysByName) {
-        if (namesDefined(toChildNode) && namesDefined(fromChildNode) && mergeArraysByName) {
-            var toGrouped = groupByName(toChildNode);
-            var fromGrouped = groupByName(fromChildNode);
-            fromGrouped.forEach(
-                    (name, fromElement) ->
-                            toGrouped.compute(
-                                    name,
-                                    (n, toElement) -> {
-                                        if (toElement == null) {
-                                            return fromElement;
-                                        }
-                                        mergeInto(toElement, fromElement, mergeArraysByName);
-                                        return toElement;
-                                    }));
-
-            toChildNode.removeAll();
-            toGrouped.values().forEach(toChildNode::add);
-        } else {
-            for (int i = 0; i < fromChildNode.size(); i++) {
-                JsonNode updatedChildNode = fromChildNode.get(i);
-                if (toChildNode.size() <= i) {
-                    // append new node
-                    toChildNode.add(updatedChildNode);
-                }
-                mergeInto(toChildNode.get(i), updatedChildNode, mergeArraysByName);
-            }
-        }
-    }
-
-    private static boolean namesDefined(ArrayNode node) {
-        var it = node.elements();
-        while (it.hasNext()) {
-            var next = it.next();
-            if (!next.has("name")) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static Map<String, ObjectNode> groupByName(ArrayNode node) {
-        var out = new LinkedHashMap<String, ObjectNode>();
-        node.elements().forEachRemaining(e -> out.put((e.get("name").asText()), (ObjectNode) e));
-        return out;
     }
 
     public static void deleteZookeeperHAMetadata(Configuration conf) {
@@ -294,42 +251,6 @@ public class FlinkUtils {
     public static int getNumTaskManagers(Configuration conf, int parallelism) {
         int taskSlots = conf.get(TaskManagerOptions.NUM_TASK_SLOTS);
         return (parallelism + taskSlots - 1) / taskSlots;
-    }
-
-    public static Double calculateClusterCpuUsage(Configuration conf, int taskManagerReplicas) {
-        var jmTotalCpu =
-                conf.getDouble(KubernetesConfigOptions.JOB_MANAGER_CPU)
-                        * conf.getDouble(KubernetesConfigOptions.JOB_MANAGER_CPU_LIMIT_FACTOR)
-                        * conf.get(KubernetesConfigOptions.KUBERNETES_JOBMANAGER_REPLICAS);
-
-        var tmTotalCpu =
-                conf.getDouble(KubernetesConfigOptions.TASK_MANAGER_CPU, 1)
-                        * conf.getDouble(KubernetesConfigOptions.TASK_MANAGER_CPU_LIMIT_FACTOR)
-                        * taskManagerReplicas;
-
-        return tmTotalCpu + jmTotalCpu;
-    }
-
-    public static Long calculateClusterMemoryUsage(Configuration conf, int taskManagerReplicas) {
-        var clusterSpec = new KubernetesClusterClientFactory().getClusterSpecification(conf);
-
-        var jmParameters = new KubernetesJobManagerParameters(conf, clusterSpec);
-        var jmTotalMemory =
-                Math.round(
-                        jmParameters.getJobManagerMemoryMB()
-                                * Math.pow(1024, 2)
-                                * jmParameters.getJobManagerMemoryLimitFactor()
-                                * jmParameters.getReplicas());
-
-        var tmTotalMemory =
-                Math.round(
-                        clusterSpec.getTaskManagerMemoryMB()
-                                * Math.pow(1024, 2)
-                                * conf.getDouble(
-                                        KubernetesConfigOptions.TASK_MANAGER_MEMORY_LIMIT_FACTOR)
-                                * taskManagerReplicas);
-
-        return tmTotalMemory + jmTotalMemory;
     }
 
     public static void setGenerationAnnotation(Configuration conf, Long generation) {

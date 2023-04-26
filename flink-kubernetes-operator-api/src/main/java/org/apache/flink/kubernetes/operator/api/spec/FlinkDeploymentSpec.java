@@ -19,7 +19,6 @@ package org.apache.flink.kubernetes.operator.api.spec;
 
 import org.apache.flink.annotation.Experimental;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.fabric8.kubernetes.api.model.Pod;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -38,7 +37,6 @@ import java.util.Map;
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 @SuperBuilder
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class FlinkDeploymentSpec extends AbstractFlinkSpec {
     /** Flink docker image used to start the Job and TaskManager pods. */
     private String image;

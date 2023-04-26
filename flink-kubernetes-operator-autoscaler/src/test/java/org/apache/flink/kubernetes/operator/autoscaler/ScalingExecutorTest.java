@@ -41,7 +41,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.flink.kubernetes.operator.autoscaler.ScalingExecutor.PARALLELISM_OVERRIDES;
@@ -184,33 +183,6 @@ public class ScalingExecutorTest {
         assertFalse(ScalingExecutor.allVerticesWithinUtilizationTarget(evaluated, scalingSummary));
     }
 
-    @Test
-    public void testVertexesExclusionForScaling() {
-        var sourceHexString = "0bfd135746ac8efb3cce668b12e16d3a";
-        var source = JobVertexID.fromHexString(sourceHexString);
-        var filterOperatorHexString = "869fb403873411306404e9f2e4438c0e";
-        var filterOperator = JobVertexID.fromHexString(filterOperatorHexString);
-        var sinkHexString = "a6b7102b8d3e3a9564998c1ffeb5e2b7";
-        var sink = JobVertexID.fromHexString(sinkHexString);
-
-        var scalingInfo = new AutoScalerInfo(new HashMap<>());
-        conf.set(AutoScalerOptions.TARGET_UTILIZATION, .8);
-        var metrics =
-                Map.of(
-                        source,
-                        evaluated(10, 80, 100),
-                        filterOperator,
-                        evaluated(10, 60, 100),
-                        sink,
-                        evaluated(10, 80, 100));
-        // filter operator should not scale
-        conf.set(AutoScalerOptions.VERTEX_EXCLUDE_IDS, List.of(filterOperatorHexString));
-        assertFalse(scalingDecisionExecutor.scaleResource(flinkDep, scalingInfo, conf, metrics));
-        // filter operator should scale
-        conf.set(AutoScalerOptions.VERTEX_EXCLUDE_IDS, List.of());
-        assertTrue(scalingDecisionExecutor.scaleResource(flinkDep, scalingInfo, conf, metrics));
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testScalingEvents(boolean scalingEnabled) {
@@ -252,7 +224,7 @@ public class ScalingExecutorTest {
         metrics.put(ScalingMetric.CATCH_UP_DATA_RATE, EvaluatedScalingMetric.of(catchupRate));
         metrics.put(
                 ScalingMetric.TRUE_PROCESSING_RATE, new EvaluatedScalingMetric(procRate, procRate));
-        ScalingMetricEvaluator.computeProcessingRateThresholds(metrics, conf, false);
+        ScalingMetricEvaluator.computeProcessingRateThresholds(metrics, conf);
         return metrics;
     }
 

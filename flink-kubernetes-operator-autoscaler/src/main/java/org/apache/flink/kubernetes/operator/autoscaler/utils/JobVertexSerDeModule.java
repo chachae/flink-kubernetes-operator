@@ -17,7 +17,6 @@
 
 package org.apache.flink.kubernetes.operator.autoscaler.utils;
 
-import org.apache.flink.kubernetes.operator.autoscaler.metrics.Edge;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -30,14 +29,11 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import java.io.IOException;
 
 /** Jackson serializer module for {@link JobVertexID}. */
-public class AutoScalerSerDeModule extends SimpleModule {
+public class JobVertexSerDeModule extends SimpleModule {
 
-    public AutoScalerSerDeModule() {
+    public JobVertexSerDeModule() {
         this.addKeySerializer(JobVertexID.class, new JobVertexIdKeySerializer());
         this.addKeyDeserializer(JobVertexID.class, new JobVertexIdKeyDeserializer());
-
-        this.addKeySerializer(Edge.class, new EdgeKeySerializer());
-        this.addKeyDeserializer(Edge.class, new EdgeKeyDeserializer());
     }
 
     private static class JobVertexIdKeySerializer extends JsonSerializer<JobVertexID> {
@@ -53,23 +49,6 @@ public class AutoScalerSerDeModule extends SimpleModule {
         @Override
         public Object deserializeKey(String s, DeserializationContext deserializationContext) {
             return JobVertexID.fromHexString(s);
-        }
-    }
-
-    private static class EdgeKeySerializer extends JsonSerializer<Edge> {
-        @Override
-        public void serialize(Edge value, JsonGenerator jgen, SerializerProvider provider)
-                throws IOException {
-
-            jgen.writeFieldName(value.getFrom().toHexString() + "," + value.getTo().toHexString());
-        }
-    }
-
-    private static class EdgeKeyDeserializer extends KeyDeserializer {
-        @Override
-        public Object deserializeKey(String s, DeserializationContext deserializationContext) {
-            var arr = s.split(",");
-            return new Edge(JobVertexID.fromHexString(arr[0]), JobVertexID.fromHexString(arr[1]));
         }
     }
 }

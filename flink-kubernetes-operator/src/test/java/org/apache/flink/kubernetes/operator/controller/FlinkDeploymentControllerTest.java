@@ -41,7 +41,6 @@ import org.apache.flink.kubernetes.operator.utils.EventRecorder;
 import org.apache.flink.kubernetes.operator.utils.IngressUtils;
 import org.apache.flink.runtime.client.JobStatusMessage;
 
-import io.fabric8.kubernetes.api.model.Event;
 import io.fabric8.kubernetes.api.model.EventBuilder;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
@@ -85,15 +84,6 @@ public class FlinkDeploymentControllerTest {
 
     private KubernetesMockServer mockServer;
     private KubernetesClient kubernetesClient;
-
-    Event mockedEvent =
-            new EventBuilder()
-                    .withNewMetadata()
-                    .withName("name")
-                    .endMetadata()
-                    .withType("type")
-                    .withReason("reason")
-                    .build();
 
     @BeforeEach
     public void setup() {
@@ -227,10 +217,9 @@ public class FlinkDeploymentControllerTest {
 
     @Test
     public void verifyFailedDeployment() throws Exception {
-
         var submittedEventValidatingResponseProvider =
                 new TestUtils.ValidatingResponseProvider<>(
-                        mockedEvent,
+                        new EventBuilder().withNewMetadata().endMetadata().build(),
                         r ->
                                 assertTrue(
                                         r.getBody()
@@ -247,7 +236,7 @@ public class FlinkDeploymentControllerTest {
 
         var validatingResponseProvider =
                 new TestUtils.ValidatingResponseProvider<>(
-                        mockedEvent,
+                        new EventBuilder().withNewMetadata().endMetadata().build(),
                         r ->
                                 assertTrue(
                                         r.getBody()
@@ -312,7 +301,7 @@ public class FlinkDeploymentControllerTest {
 
         var submittedEventValidatingResponseProvider =
                 new TestUtils.ValidatingResponseProvider<>(
-                        mockedEvent,
+                        new EventBuilder().withNewMetadata().endMetadata().build(),
                         r ->
                                 assertTrue(
                                         r.getBody()
@@ -329,7 +318,7 @@ public class FlinkDeploymentControllerTest {
 
         var validatingResponseProvider =
                 new TestUtils.ValidatingResponseProvider<>(
-                        mockedEvent,
+                        new EventBuilder().withNewMetadata().endMetadata().build(),
                         r -> {
                             String recordedRequestBody = r.getBody().readUtf8();
                             assertTrue(recordedRequestBody.contains(reason));
@@ -342,7 +331,7 @@ public class FlinkDeploymentControllerTest {
                 .andReply(validatingResponseProvider)
                 .once();
 
-        flinkService.setPodList(TestUtils.createFailedPodList(crashLoopMessage, reason));
+        flinkService.setJmPodList(TestUtils.createFailedPodList(crashLoopMessage, reason));
 
         FlinkDeployment appCluster = TestUtils.buildApplicationCluster();
         UpdateControl<FlinkDeployment> updateControl;
@@ -919,7 +908,7 @@ public class FlinkDeploymentControllerTest {
     @Test
     public void testSuccessfulObservationShouldClearErrors() throws Exception {
         final String crashLoopMessage = "deploy errors";
-        flinkService.setPodList(
+        flinkService.setJmPodList(
                 TestUtils.createFailedPodList(
                         crashLoopMessage, DeploymentFailedException.REASON_CRASH_LOOP_BACKOFF));
 
@@ -1114,18 +1103,6 @@ public class FlinkDeploymentControllerTest {
         assertEquals(
                 org.apache.flink.api.common.JobStatus.RUNNING.name(),
                 appCluster.getStatus().getJobStatus().getState());
-    }
-
-    @Test
-    public void verifyCanaryHandling() throws Exception {
-        var canary = TestUtils.createCanaryDeployment();
-        kubernetesClient.resource(canary).create();
-        assertTrue(testController.reconcile(canary, context).isNoUpdate());
-        assertEquals(0, testController.getInternalStatusUpdateCount());
-        assertEquals(1, testController.getCanaryResourceManager().getNumberOfActiveCanaries());
-        testController.cleanup(canary, context);
-        assertEquals(0, testController.getInternalStatusUpdateCount());
-        assertEquals(0, testController.getCanaryResourceManager().getNumberOfActiveCanaries());
     }
 
     private HasMetadata getIngress(FlinkDeployment deployment) {

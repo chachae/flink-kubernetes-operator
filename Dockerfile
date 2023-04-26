@@ -36,15 +36,12 @@ RUN cd /app/tools/license; mkdir jars; cd jars; \
 # stage
 FROM eclipse-temurin:11-jre-jammy
 ENV FLINK_HOME=/opt/flink
-ENV FLINK_PLUGINS_DIR=$FLINK_HOME/plugins
-ENV OPERATOR_VERSION=1.5-SNAPSHOT
+ENV FLINK_PLUGINS_DIR=/opt/flink/plugins
+ENV OPERATOR_VERSION=1.4-SNAPSHOT
 ENV OPERATOR_JAR=flink-kubernetes-operator-$OPERATOR_VERSION-shaded.jar
 ENV AUTOSCALER_JAR=flink-kubernetes-operator-autoscaler-$OPERATOR_VERSION.jar
 ENV WEBHOOK_JAR=flink-kubernetes-webhook-$OPERATOR_VERSION-shaded.jar
 ENV FLINK_KUBERNETES_SHADED_JAR=flink-kubernetes-standalone-$OPERATOR_VERSION-shaded.jar
-
-ENV OPERATOR_LIB=$FLINK_HOME/operator-lib
-RUN mkdir -p $OPERATOR_LIB
 
 WORKDIR /flink-kubernetes-operator
 RUN groupadd --system --gid=9999 flink && \
@@ -65,6 +62,7 @@ RUN chown -R flink:flink $FLINK_HOME && \
     chown flink:flink $WEBHOOK_JAR && \
     chown flink:flink $FLINK_KUBERNETES_SHADED_JAR && \
     chown flink:flink /docker-entrypoint.sh
+
 
 ARG SKIP_OS_UPDATE=true
 

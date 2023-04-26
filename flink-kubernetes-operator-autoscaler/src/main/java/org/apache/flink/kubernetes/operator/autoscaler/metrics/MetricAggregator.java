@@ -19,6 +19,7 @@ package org.apache.flink.kubernetes.operator.autoscaler.metrics;
 
 import org.apache.flink.runtime.rest.messages.job.metrics.AggregatedMetric;
 
+import java.util.Optional;
 import java.util.function.Function;
 
 /** Enum specifying which aggregator to use when getting a metric value. */
@@ -33,11 +34,7 @@ public enum MetricAggregator {
         this.getter = getter;
     }
 
-    public double get(AggregatedMetric metric) {
-        if (metric != null) {
-            return getter.apply(metric);
-        } else {
-            return Double.NaN;
-        }
+    public Optional<Double> get(AggregatedMetric metric) {
+        return Optional.ofNullable(metric).map(getter).filter(d -> !d.isNaN());
     }
 }

@@ -76,7 +76,8 @@ public class EventUtils {
             existing.setLastTimestamp(Instant.now().toString());
             existing.setCount(existing.getCount() + 1);
             existing.setMessage(message);
-            eventListener.accept(client.resource(existing).createOrReplace());
+            client.resource(existing).createOrReplace();
+            eventListener.accept(existing);
             return false;
         } else {
             var event =
@@ -103,7 +104,8 @@ public class EventUtils {
                             .withNamespace(target.getMetadata().getNamespace())
                             .endMetadata()
                             .build();
-            eventListener.accept(client.resource(event).createOrReplace());
+            client.resource(event).createOrReplace();
+            eventListener.accept(event);
             return true;
         }
     }

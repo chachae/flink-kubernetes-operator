@@ -19,7 +19,6 @@ package org.apache.flink.kubernetes.operator;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
@@ -43,7 +42,6 @@ import org.apache.flink.kubernetes.operator.config.FlinkConfigManager;
 import org.apache.flink.kubernetes.operator.exception.RecoveryFailureException;
 import org.apache.flink.kubernetes.operator.observer.SavepointFetchResult;
 import org.apache.flink.kubernetes.operator.service.AbstractFlinkService;
-import org.apache.flink.kubernetes.operator.service.CheckpointHistoryWrapper;
 import org.apache.flink.kubernetes.operator.standalone.StandaloneKubernetesConfigOptionsInternal;
 import org.apache.flink.kubernetes.operator.utils.FlinkUtils;
 import org.apache.flink.kubernetes.operator.utils.SavepointUtils;
@@ -53,8 +51,6 @@ import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.runtime.jobmanager.HighAvailabilityMode;
 import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.messages.Acknowledge;
-import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
-import org.apache.flink.runtime.messages.FlinkJobTerminatedWithoutCancellationException;
 import org.apache.flink.runtime.messages.webmonitor.JobDetails;
 import org.apache.flink.runtime.messages.webmonitor.MultipleJobsDetails;
 import org.apache.flink.runtime.rest.messages.DashboardConfiguration;
@@ -62,14 +58,11 @@ import org.apache.flink.runtime.rest.messages.EmptyResponseBody;
 import org.apache.flink.runtime.rest.messages.JobsOverviewHeaders;
 import org.apache.flink.util.SerializedThrowable;
 
-import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
-import lombok.Getter;
-import lombok.Setter;
 
 import javax.annotation.Nullable;
 
@@ -101,27 +94,18 @@ public class TestingFlinkService extends AbstractFlinkService {
 
     private final List<Tuple3<String, JobStatusMessage, Configuration>> jobs = new ArrayList<>();
     private final Map<JobID, String> jobErrors = new HashMap<>();
-    @Getter private final Set<String> sessions = new HashSet<>();
-    @Setter private boolean isFlinkJobNotFound = false;
-    @Setter private boolean isFlinkJobTerminatedWithoutCancellation = false;
-    @Setter private boolean isPortReady = true;
-    @Setter private boolean haDataAvailable = true;
-    @Setter private boolean jobManagerReady = true;
-    @Setter private boolean deployFailure = false;
-    @Setter private Runnable sessionJobSubmittedCallback;
-    @Setter private PodList podList = new PodList();
-    @Setter private Consumer<Configuration> listJobConsumer = conf -> {};
+    private final Set<String> sessions = new HashSet<>();
+    private boolean isPortReady = true;
+    private boolean haDataAvailable = true;
+    private boolean jobManagerReady = true;
+    private boolean deployFailure = false;
+    private Runnable sessionJobSubmittedCallback;
+    private PodList podList = new PodList();
+    private Consumer<Configuration> listJobConsumer = conf -> {};
     private final List<String> disposedSavepoints = new ArrayList<>();
     private final Map<String, Boolean> savepointTriggers = new HashMap<>();
-
-    @Getter private int desiredReplicas = 0;
-    @Getter private int cancelJobCallCount = 0;
-
-    @Setter
-    private Tuple2<
-                    Optional<CheckpointHistoryWrapper.CompletedCheckpointInfo>,
-                    Optional<CheckpointHistoryWrapper.PendingCheckpointInfo>>
-            checkpointInfo;
+    private int desiredReplicas = 0;
+    private int cancelJobCallCount = 0;
 
     private Map<String, String> metricsValues = new HashMap<>();
 
@@ -155,6 +139,10 @@ public class TestingFlinkService extends AbstractFlinkService {
 
     public void clearJobsInTerminalState() {
         jobs.removeIf(job -> job.f1.getJobState().isTerminalState());
+    }
+
+    public Set<String> getSessions() {
+        return sessions;
     }
 
     @Override
@@ -204,6 +192,22 @@ public class TestingFlinkService extends AbstractFlinkService {
         return HighAvailabilityMode.isHighAvailabilityModeActivated(conf) && haDataAvailable;
     }
 
+    public void setHaDataAvailable(boolean haDataAvailable) {
+        this.haDataAvailable = haDataAvailable;
+    }
+
+    public void setJobManagerReady(boolean jmReady) {
+        this.jobManagerReady = jmReady;
+    }
+
+    public void setDeployFailure(boolean deployFailure) {
+        this.deployFailure = deployFailure;
+    }
+
+    public void setSessionJobSubmittedCallback(Runnable sessionJobSubmittedCallback) {
+        this.sessionJobSubmittedCallback = sessionJobSubmittedCallback;
+    }
+
     @Override
     public void submitSessionCluster(Configuration conf) throws Exception {
         if (deployFailure) {
@@ -244,6 +248,10 @@ public class TestingFlinkService extends AbstractFlinkService {
             throw new TimeoutException("JM port is unavailable");
         }
         return super.listJobs(conf);
+    }
+
+    public void setListJobConsumer(Consumer<Configuration> listJobConsumer) {
+        this.listJobConsumer = listJobConsumer;
     }
 
     public List<Tuple3<String, JobStatusMessage, Configuration>> listJobs() {
@@ -372,26 +380,7 @@ public class TestingFlinkService extends AbstractFlinkService {
             throws Exception {
         cancelJobCallCount++;
 
-        if (!isPortReady) {
-            throw new TimeoutException("JM port is unavailable");
-        }
-
-        if (isFlinkJobNotFound) {
-            throw new FlinkJobNotFoundException(jobID);
-        }
-
         var jobOpt = jobs.stream().filter(js -> js.f1.getJobId().equals(jobID)).findAny();
-
-        if (isFlinkJobTerminatedWithoutCancellation) {
-            JobStatusMessage oldStatus = jobOpt.get().f1;
-            jobOpt.get().f1 =
-                    new JobStatusMessage(
-                            oldStatus.getJobId(),
-                            oldStatus.getJobName(),
-                            JobStatus.FAILED,
-                            oldStatus.getStartTime());
-            throw new FlinkJobTerminatedWithoutCancellationException(jobID, JobStatus.FAILED);
-        }
 
         if (jobOpt.isEmpty()) {
             throw new Exception("Job not found");
@@ -417,10 +406,7 @@ public class TestingFlinkService extends AbstractFlinkService {
 
     @Override
     protected void deleteClusterInternal(
-            ObjectMeta meta,
-            Configuration conf,
-            boolean deleteHaMeta,
-            DeletionPropagation deletionPropagation) {
+            ObjectMeta meta, Configuration conf, boolean deleteHaMeta) {
         jobs.clear();
         sessions.remove(meta.getName());
     }
@@ -439,30 +425,6 @@ public class TestingFlinkService extends AbstractFlinkService {
 
     @Override
     public Optional<Savepoint> getLastCheckpoint(JobID jobId, Configuration conf) throws Exception {
-        jobs.stream()
-                .filter(js -> js.f1.getJobId().equals(jobId))
-                .findAny()
-                .ifPresent(
-                        t -> {
-                            if (!t.f1.getJobState().isGloballyTerminalState()) {
-                                throw new RuntimeException(
-                                        "Checkpoint should not be queried if job is not in terminal state");
-                            }
-                        });
-
-        return super.getLastCheckpoint(jobId, conf);
-    }
-
-    @Override
-    public Tuple2<
-                    Optional<CheckpointHistoryWrapper.CompletedCheckpointInfo>,
-                    Optional<CheckpointHistoryWrapper.PendingCheckpointInfo>>
-            getCheckpointInfo(JobID jobId, Configuration conf) throws Exception {
-
-        if (checkpointInfo != null) {
-            return checkpointInfo;
-        }
-
         var jobOpt = jobs.stream().filter(js -> js.f1.getJobId().equals(jobId)).findAny();
 
         if (jobOpt.isEmpty()) {
@@ -470,21 +432,24 @@ public class TestingFlinkService extends AbstractFlinkService {
         }
 
         var t = jobOpt.get();
+        if (!t.f1.getJobState().isGloballyTerminalState()) {
+            throw new Exception("Checkpoint should not be queried if job is not in terminal state");
+        }
 
         if (t.f0 != null) {
-            return Tuple2.of(
-                    Optional.of(
-                            new CheckpointHistoryWrapper.CompletedCheckpointInfo(
-                                    0L, t.f0, System.currentTimeMillis())),
-                    Optional.empty());
+            return Optional.of(Savepoint.of(t.f0, SavepointTriggerType.UNKNOWN));
         } else {
-            return Tuple2.of(Optional.empty(), Optional.empty());
+            return Optional.empty();
         }
     }
 
     @Override
     public boolean isJobManagerPortReady(Configuration config) {
         return isPortReady;
+    }
+
+    public void setPortReady(boolean isPortReady) {
+        this.isPortReady = isPortReady;
     }
 
     @Override
@@ -495,6 +460,10 @@ public class TestingFlinkService extends AbstractFlinkService {
     @Override
     protected PodList getJmPodList(String namespace, String clusterId) {
         return podList;
+    }
+
+    public void setJmPodList(PodList podList) {
+        this.podList = podList;
     }
 
     public void markApplicationJobFailedWithError(JobID jobID, String error) throws Exception {
@@ -544,6 +513,10 @@ public class TestingFlinkService extends AbstractFlinkService {
         return true;
     }
 
+    public int getDesiredReplicas() {
+        return desiredReplicas;
+    }
+
     public void setMetricValue(String name, String value) {
         metricsValues.put(name, value);
     }
@@ -552,5 +525,9 @@ public class TestingFlinkService extends AbstractFlinkService {
     public Map<String, String> getMetrics(
             Configuration conf, String jobId, List<String> metricNames) {
         return metricsValues;
+    }
+
+    public int getCancelJobCallCount() {
+        return cancelJobCallCount;
     }
 }

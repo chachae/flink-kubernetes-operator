@@ -43,7 +43,9 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-/** Doclet for generating the FlinkDeployment CRD reference. */
+/**
+ * Doclet for generating the FlinkDeployment CRD reference.
+ */
 public class CrdReferenceDoclet implements Doclet {
 
     private static final String SPEC_PACKAGE_PREFIX =
@@ -77,7 +79,8 @@ public class CrdReferenceDoclet implements Doclet {
     }
 
     @Override
-    public void init(Locale locale, Reporter reporter) {}
+    public void init(Locale locale, Reporter reporter) {
+    }
 
     @Override
     public String getName() {
@@ -169,7 +172,7 @@ public class CrdReferenceDoclet implements Doclet {
     }
 
     private String cleanDoc(String doc) {
-        return doc.replaceAll("[\\t]+", " ").replaceAll("[\\n\\r]+", "");
+        return doc.replaceAll("\\t+", " ").replaceAll("[\\n\\r]+", "");
     }
 
     private Set<? extends Element> sortedByName(Set<? extends Element> elements) {

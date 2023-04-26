@@ -23,7 +23,6 @@ import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.kubernetes.operator.metrics.KubernetesOperatorMetricOptions;
 import org.apache.flink.kubernetes.operator.utils.EnvUtils;
 
-import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.javaoperatorsdk.operator.api.config.LeaderElectionConfiguration;
 import io.javaoperatorsdk.operator.api.config.RetryConfiguration;
 import lombok.Value;
@@ -68,7 +67,6 @@ public class FlinkOperatorConfiguration {
     int exceptionThrowableCountThreshold;
     String labelSelector;
     LeaderElectionConfiguration leaderElectionConfiguration;
-    DeletionPropagation deletionPropagation;
 
     public static FlinkOperatorConfiguration fromConfiguration(Configuration operatorConfig) {
         Duration reconcileInterval =
@@ -174,9 +172,6 @@ public class FlinkOperatorConfiguration {
         String labelSelector =
                 operatorConfig.getString(KubernetesOperatorConfigOptions.OPERATOR_LABEL_SELECTOR);
 
-        DeletionPropagation deletionPropagation =
-                operatorConfig.get(KubernetesOperatorConfigOptions.RESOURCE_DELETION_PROPAGATION);
-
         return new FlinkOperatorConfiguration(
                 reconcileInterval,
                 reconcilerMaxParallelism,
@@ -201,8 +196,7 @@ public class FlinkOperatorConfiguration {
                 exceptionFieldLengthThreshold,
                 exceptionThrowableCountThreshold,
                 labelSelector,
-                getLeaderElectionConfig(operatorConfig),
-                deletionPropagation);
+                getLeaderElectionConfig(operatorConfig));
     }
 
     private static LeaderElectionConfiguration getLeaderElectionConfig(Configuration conf) {

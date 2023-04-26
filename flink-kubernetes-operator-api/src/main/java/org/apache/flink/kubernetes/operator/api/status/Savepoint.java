@@ -64,10 +64,6 @@ public class Savepoint {
         this.triggerNonce = triggerNonce;
     }
 
-    public static Savepoint of(String location, long timeStamp, SavepointTriggerType triggerType) {
-        return new Savepoint(timeStamp, location, triggerType, SavepointFormatType.UNKNOWN, null);
-    }
-
     public static Savepoint of(String location, SavepointTriggerType triggerType) {
         return new Savepoint(
                 System.currentTimeMillis(),

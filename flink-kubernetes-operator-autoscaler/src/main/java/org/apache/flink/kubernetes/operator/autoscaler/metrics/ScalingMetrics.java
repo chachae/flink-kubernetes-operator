@@ -23,15 +23,13 @@ import org.apache.flink.kubernetes.operator.autoscaler.topology.JobTopology;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.rest.messages.job.metrics.AggregatedMetric;
 
-import org.apache.commons.math3.util.Precision;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
+
+import static org.apache.flink.kubernetes.operator.autoscaler.config.AutoScalerOptions.SOURCE_SCALING_ENABLED;
 
 /** Utilities for computing scaling metrics based on Flink metrics. */
 public class ScalingMetrics {
@@ -61,62 +59,95 @@ public class ScalingMetrics {
             Map<FlinkMetric, AggregatedMetric> flinkMetrics,
             Map<ScalingMetric, Double> scalingMetrics,
             JobTopology topology,
-            double lagGrowthRate,
+            Optional<Double> lagGrowthOpt,
             Configuration conf) {
 
-        var isSource = topology.isSource(jobVertexID);
+        var source = topology.getInputs().get(jobVertexID).isEmpty();
+        var sink = topology.getOutputs().get(jobVertexID).isEmpty();
 
-        double busyTimeMsPerSecond = getBusyTimeMsPerSecond(flinkMetrics, conf, jobVertexID);
-        double numRecordsInPerSecond =
-                getNumRecordsInPerSecond(flinkMetrics, jobVertexID, isSource);
+        var busyTimeAggregator = conf.get(AutoScalerOptions.BUSY_TIME_AGGREGATOR);
+        var busyTimeOpt = busyTimeAggregator.get(flinkMetrics.get(FlinkMetric.BUSY_TIME_PER_SEC));
 
-        if (isSource) {
-            double sourceDataRate = Math.max(0, numRecordsInPerSecond + lagGrowthRate);
-            LOG.info("Using computed source data rate {} for {}", sourceDataRate, jobVertexID);
-            scalingMetrics.put(ScalingMetric.SOURCE_DATA_RATE, sourceDataRate);
-            scalingMetrics.put(ScalingMetric.CURRENT_PROCESSING_RATE, numRecordsInPerSecond);
+        if (busyTimeOpt.isEmpty()) {
+            LOG.error("Cannot compute true processing/output rate without busyTimeMsPerSecond");
+            return;
         }
 
-        if (!Double.isNaN(numRecordsInPerSecond)) {
-            double trueProcessingRate = computeTrueRate(numRecordsInPerSecond, busyTimeMsPerSecond);
-            scalingMetrics.put(ScalingMetric.TRUE_PROCESSING_RATE, trueProcessingRate);
-            scalingMetrics.put(ScalingMetric.CURRENT_PROCESSING_RATE, numRecordsInPerSecond);
+        var numRecordsInPerSecond = flinkMetrics.get(FlinkMetric.NUM_RECORDS_IN_PER_SEC);
+        if (numRecordsInPerSecond == null) {
+            numRecordsInPerSecond =
+                    flinkMetrics.get(FlinkMetric.SOURCE_TASK_NUM_RECORDS_IN_PER_SEC);
+        }
+
+        var outputPerSecond = flinkMetrics.get(FlinkMetric.NUM_RECORDS_OUT_PER_SEC);
+
+        double busyTimeMultiplier = 1000 / busyTimeOpt.get();
+
+        if (source && !conf.getBoolean(SOURCE_SCALING_ENABLED)) {
+            double sourceInputRate =
+                    numRecordsInPerSecond != null ? numRecordsInPerSecond.getSum() : Double.NaN;
+
+            double targetDataRate;
+            if (!Double.isNaN(sourceInputRate) && sourceInputRate > 0) {
+                targetDataRate = sourceInputRate;
+            } else {
+                // If source in metric is not available (maybe legacy source) we use source
+                // output that should always be available
+                targetDataRate =
+                        flinkMetrics.get(FlinkMetric.SOURCE_TASK_NUM_RECORDS_OUT_PER_SEC).getSum();
+            }
+            scalingMetrics.put(ScalingMetric.TRUE_PROCESSING_RATE, Double.NaN);
+            scalingMetrics.put(
+                    ScalingMetric.OUTPUT_RATIO, outputPerSecond.getSum() / targetDataRate);
+            var trueOutputRate = busyTimeMultiplier * outputPerSecond.getSum();
+            scalingMetrics.put(ScalingMetric.TRUE_OUTPUT_RATE, trueOutputRate);
+            scalingMetrics.put(ScalingMetric.TARGET_DATA_RATE, trueOutputRate);
+            LOG.info(
+                    "Scaling disabled for source {} using output rate {} as target",
+                    jobVertexID,
+                    trueOutputRate);
         } else {
-            LOG.error("Cannot compute true processing rate without numRecordsInPerSecond");
-        }
-    }
-
-    public static Map<Edge, Double> computeOutputRatios(
-            Map<JobVertexID, Map<FlinkMetric, AggregatedMetric>> flinkMetrics,
-            JobTopology topology) {
-
-        var out = new HashMap<Edge, Double>();
-        for (JobVertexID from : flinkMetrics.keySet()) {
-            var outputs = topology.getOutputs().get(from);
-            if (outputs.isEmpty()) {
-                continue;
-            }
-
-            double numRecordsInPerSecond =
-                    getNumRecordsInPerSecond(flinkMetrics.get(from), from, topology.isSource(from));
-
-            for (JobVertexID to : outputs) {
-                double outputRatio = 0;
-                // If the input rate is zero, we also need to flatten the output rate.
-                // Otherwise, the OUTPUT_RATIO would be outrageously large, leading to
-                // a rapid scale up.
-                if (numRecordsInPerSecond > 0) {
-                    double edgeOutPerSecond =
-                            computeEdgeOutPerSecond(topology, flinkMetrics, from, to);
-                    if (edgeOutPerSecond > 0) {
-                        outputRatio = edgeOutPerSecond / numRecordsInPerSecond;
-                    }
+            if (source) {
+                if (!lagGrowthOpt.isPresent() || numRecordsInPerSecond.getSum().isNaN()) {
+                    LOG.error(
+                            "Cannot compute source target data rate without numRecordsInPerSecond and pendingRecords (lag) metric for {}.",
+                            jobVertexID);
+                    scalingMetrics.put(ScalingMetric.TARGET_DATA_RATE, Double.NaN);
+                } else {
+                    double sourceDataRate =
+                            Math.max(0, numRecordsInPerSecond.getSum() + lagGrowthOpt.get());
+                    LOG.info(
+                            "Using computed source data rate {} for {}",
+                            sourceDataRate,
+                            jobVertexID);
+                    scalingMetrics.put(ScalingMetric.SOURCE_DATA_RATE, sourceDataRate);
                 }
-                out.put(new Edge(from, to), outputRatio);
+            }
+
+            if (!numRecordsInPerSecond.getSum().isNaN()) {
+                double trueProcessingRate = busyTimeMultiplier * numRecordsInPerSecond.getSum();
+                if (trueProcessingRate <= 0 || !Double.isFinite(trueProcessingRate)) {
+                    trueProcessingRate = Double.NaN;
+                }
+                scalingMetrics.put(ScalingMetric.TRUE_PROCESSING_RATE, trueProcessingRate);
+            } else {
+                LOG.error("Cannot compute true processing rate without numRecordsInPerSecond");
+            }
+
+            if (!sink) {
+                if (!outputPerSecond.getSum().isNaN()) {
+                    scalingMetrics.put(
+                            ScalingMetric.OUTPUT_RATIO,
+                            outputPerSecond.getSum() / numRecordsInPerSecond.getSum());
+                    scalingMetrics.put(
+                            ScalingMetric.TRUE_OUTPUT_RATE,
+                            busyTimeMultiplier * outputPerSecond.getSum());
+                } else {
+                    LOG.error(
+                            "Cannot compute processing and input rate without ");
+                }
             }
         }
-
-        return out;
     }
 
     public static void computeLagMetrics(
@@ -125,131 +156,6 @@ public class ScalingMetrics {
         var pendingRecords = flinkMetrics.get(FlinkMetric.PENDING_RECORDS);
         if (pendingRecords != null) {
             scalingMetrics.put(ScalingMetric.LAG, pendingRecords.getSum());
-        } else {
-            scalingMetrics.put(ScalingMetric.LAG, 0.);
         }
-    }
-
-    private static double getBusyTimeMsPerSecond(
-            Map<FlinkMetric, AggregatedMetric> flinkMetrics,
-            Configuration conf,
-            JobVertexID jobVertexId) {
-        var busyTimeAggregator = conf.get(AutoScalerOptions.BUSY_TIME_AGGREGATOR);
-        var busyTimeMsPerSecond =
-                busyTimeAggregator.get(flinkMetrics.get(FlinkMetric.BUSY_TIME_PER_SEC));
-        if (!Double.isFinite(busyTimeMsPerSecond)) {
-            LOG.error(
-                    "No busyTimeMsPerSecond metric available for {}. No scaling will be performed for this vertex.",
-                    jobVertexId);
-            excludeVertexFromScaling(conf, jobVertexId);
-            // Pretend that the load is balanced because we don't know any better
-            busyTimeMsPerSecond = conf.get(AutoScalerOptions.TARGET_UTILIZATION) * 1000;
-        }
-        return busyTimeMsPerSecond;
-    }
-
-    private static double getNumRecordsInPerSecond(
-            Map<FlinkMetric, AggregatedMetric> flinkMetrics,
-            JobVertexID jobVertexID,
-            boolean isSource) {
-        var numRecordsInPerSecond = flinkMetrics.get(FlinkMetric.NUM_RECORDS_IN_PER_SEC);
-        if (isSource && (numRecordsInPerSecond == null || numRecordsInPerSecond.getSum() == 0)) {
-            numRecordsInPerSecond =
-                    flinkMetrics.get(FlinkMetric.SOURCE_TASK_NUM_RECORDS_IN_PER_SEC);
-        }
-        if (isSource && (numRecordsInPerSecond == null || numRecordsInPerSecond.getSum() == 0)) {
-            numRecordsInPerSecond =
-                    flinkMetrics.get(FlinkMetric.SOURCE_TASK_NUM_RECORDS_OUT_PER_SEC);
-        }
-        if (numRecordsInPerSecond == null) {
-            LOG.warn("Received null input rate for {}. Returning NaN.", jobVertexID);
-            return Double.NaN;
-        }
-        return numRecordsInPerSecond.getSum();
-    }
-
-    private static double getNumRecordsOutPerSecond(
-            Map<FlinkMetric, AggregatedMetric> flinkMetrics, JobVertexID jobVertexID) {
-
-        AggregatedMetric numRecordsOutPerSecond =
-                flinkMetrics.get(FlinkMetric.NUM_RECORDS_OUT_PER_SEC);
-
-        if (numRecordsOutPerSecond == null) {
-            LOG.warn("Received null output rate for {}. Returning NaN.", jobVertexID);
-            return Double.NaN;
-        }
-        return numRecordsOutPerSecond.getSum();
-    }
-
-    private static double computeEdgeOutPerSecond(
-            JobTopology topology,
-            Map<JobVertexID, Map<FlinkMetric, AggregatedMetric>> flinkMetrics,
-            JobVertexID from,
-            JobVertexID to) {
-        var toMetrics = flinkMetrics.get(to);
-
-        var toVertexInputs = topology.getInputs().get(to);
-        // Case 1: Downstream vertex has a single input (from) so we can use the most reliable num
-        // records in
-        if (toVertexInputs.size() == 1) {
-            LOG.debug(
-                    "Computing edge ({}, {}) data rate for single input downstream task", from, to);
-            return getNumRecordsInPerSecond(toMetrics, to, false);
-        }
-
-        // Case 2: Downstream vertex has only inputs from upstream vertices which don't have other
-        // outputs
-        double numRecordsOutFromUpstreamInputs = 0;
-        for (JobVertexID input : toVertexInputs) {
-            if (input.equals(from)) {
-                // Exclude source edge because we only want to consider other input edges
-                continue;
-            }
-            if (topology.getOutputs().get(input).size() == 1) {
-                numRecordsOutFromUpstreamInputs +=
-                        getNumRecordsOutPerSecond(flinkMetrics.get(input), input);
-            } else {
-                // Output vertex has multiple outputs, cannot use this information...
-                numRecordsOutFromUpstreamInputs = Double.NaN;
-                break;
-            }
-        }
-        if (!Double.isNaN(numRecordsOutFromUpstreamInputs)) {
-            LOG.debug(
-                    "Computing edge ({}, {}) data rate by subtracting upstream input rates",
-                    from,
-                    to);
-            return getNumRecordsInPerSecond(toMetrics, to, false) - numRecordsOutFromUpstreamInputs;
-        }
-        var fromMetrics = flinkMetrics.get(from);
-
-        // Case 3: We fall back simply to num records out, this is the least reliable
-        LOG.debug(
-                "Computing edge ({}, {}) data rate by falling back to from num records out",
-                from,
-                to);
-        return getNumRecordsOutPerSecond(fromMetrics, from);
-    }
-
-    private static double computeTrueRate(double rate, double busyTimeMsPerSecond) {
-        if (rate <= 0 || busyTimeMsPerSecond <= 0) {
-            // Nothing is coming in, we assume infinite processing power
-            // until we can sample the true processing rate (i.e. data flows).
-            return Double.POSITIVE_INFINITY;
-        }
-        return rate / (busyTimeMsPerSecond / 1000);
-    }
-
-    /** Temporarily exclude vertex from scaling for this run. This does not update the spec. */
-    private static void excludeVertexFromScaling(Configuration conf, JobVertexID jobVertexId) {
-        Set<String> excludedIds = new HashSet<>(conf.get(AutoScalerOptions.VERTEX_EXCLUDE_IDS));
-        excludedIds.add(jobVertexId.toHexString());
-        conf.set(AutoScalerOptions.VERTEX_EXCLUDE_IDS, new ArrayList<>(excludedIds));
-    }
-
-    public static double roundMetric(double value) {
-        double rounded = Precision.round(value, 3);
-        // Never round down to 0, return original value instead
-        return rounded == 0 ? value : rounded;
     }
 }

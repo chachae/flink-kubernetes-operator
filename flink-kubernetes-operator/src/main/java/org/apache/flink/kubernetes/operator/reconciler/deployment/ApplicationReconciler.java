@@ -72,15 +72,14 @@ public class ApplicationReconciler
     }
 
     @Override
-    protected AvailableUpgradeMode getAvailableUpgradeMode(
-            FlinkResourceContext<FlinkDeployment> ctx, Configuration deployConfig)
-            throws Exception {
+    protected Optional<UpgradeMode> getAvailableUpgradeMode(
+            FlinkResourceContext<FlinkDeployment> ctx, Configuration deployConfig) {
 
         var deployment = ctx.getResource();
         var status = deployment.getStatus();
         var availableUpgradeMode = super.getAvailableUpgradeMode(ctx, deployConfig);
 
-        if (availableUpgradeMode.isAvailable() || !availableUpgradeMode.isAllowFallback()) {
+        if (availableUpgradeMode.isPresent()) {
             return availableUpgradeMode;
         }
         var flinkService = ctx.getFlinkService();
@@ -96,7 +95,7 @@ public class ApplicationReconciler
             if (flinkService.isHaMetadataAvailable(deployConfig)) {
                 LOG.info(
                         "Job is not running but HA metadata is available for last state restore, ready for upgrade");
-                return AvailableUpgradeMode.of(UpgradeMode.LAST_STATE);
+                return Optional.of(UpgradeMode.LAST_STATE);
             }
         }
 
@@ -124,7 +123,7 @@ public class ApplicationReconciler
 
         LOG.info(
                 "Job is not running and HA metadata is not available or usable for executing the upgrade, waiting for upgradeable state");
-        return AvailableUpgradeMode.unavailable();
+        return Optional.empty();
     }
 
     private void deleteJmThatNeverStarted(
@@ -225,11 +224,12 @@ public class ApplicationReconciler
     @Override
     protected void cleanupAfterFailedJob(FlinkResourceContext<FlinkDeployment> ctx) {
         // The job has already stopped. Delete the deployment and we are ready.
-        var flinkService = ctx.getFlinkService();
-        var conf = ctx.getDeployConfig(ctx.getResource().getSpec());
-        flinkService.deleteClusterDeployment(
-                ctx.getResource().getMetadata(), ctx.getResource().getStatus(), conf, false);
-        flinkService.waitForClusterShutdown(conf);
+        ctx.getFlinkService()
+                .deleteClusterDeployment(
+                        ctx.getResource().getMetadata(),
+                        ctx.getResource().getStatus(),
+                        ctx.getDeployConfig(ctx.getResource().getSpec()),
+                        false);
     }
 
     // Workaround for https://issues.apache.org/jira/browse/FLINK-27569
@@ -281,10 +281,10 @@ public class ApplicationReconciler
                         MSG_RESTART_UNHEALTHY);
                 cleanupAfterFailedJob(ctx);
             }
-
-            resubmitJob(
-                    ctx,
-                    HighAvailabilityMode.isHighAvailabilityModeActivated(ctx.getObserveConfig()));
+            boolean requireHaMetadata =
+                    ReconciliationUtils.getDeployedSpec(ctx.getResource()).getJob().getUpgradeMode()
+                            != UpgradeMode.STATELESS;
+            resubmitJob(ctx, requireHaMetadata);
             return true;
         }
 

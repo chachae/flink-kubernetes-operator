@@ -19,14 +19,11 @@ package org.apache.flink.kubernetes.operator.utils;
 
 import org.apache.flink.kubernetes.operator.TestUtils;
 
-import io.fabric8.kubernetes.api.model.Event;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.server.mock.EnableKubernetesMockClient;
 import io.fabric8.kubernetes.client.server.mock.KubernetesMockServer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import java.util.function.Consumer;
 
 /** Test for {@link EventUtils}. */
 @EnableKubernetesMockClient(crud = true)
@@ -34,17 +31,9 @@ public class EventUtilsTest {
 
     private KubernetesMockServer mockServer;
     private KubernetesClient kubernetesClient;
-    private Event eventConsumed = null;
 
     @Test
     public void testCreateOrReplaceEvent() {
-        var consumer =
-                new Consumer<Event>() {
-                    @Override
-                    public void accept(Event event) {
-                        eventConsumed = event;
-                    }
-                };
         var flinkApp = TestUtils.buildApplicationCluster();
         var reason = "Cleanup";
         var message = "message";
@@ -63,7 +52,7 @@ public class EventUtilsTest {
                         reason,
                         message,
                         EventRecorder.Component.Operator,
-                        consumer));
+                        e -> {}));
         var event =
                 kubernetesClient
                         .v1()
@@ -72,11 +61,9 @@ public class EventUtilsTest {
                         .withName(eventName)
                         .get();
         Assertions.assertNotNull(event);
-        Assertions.assertEquals(eventConsumed, event);
         Assertions.assertEquals(1, event.getCount());
         Assertions.assertEquals(reason, event.getReason());
 
-        eventConsumed = null;
         Assertions.assertFalse(
                 EventUtils.createOrUpdateEvent(
                         kubernetesClient,
@@ -85,7 +72,7 @@ public class EventUtilsTest {
                         reason,
                         message,
                         EventRecorder.Component.Operator,
-                        consumer));
+                        e -> {}));
         event =
                 kubernetesClient
                         .v1()
@@ -93,8 +80,7 @@ public class EventUtilsTest {
                         .inNamespace(flinkApp.getMetadata().getNamespace())
                         .withName(eventName)
                         .get();
-        Assertions.assertNotNull(event);
-        Assertions.assertEquals(eventConsumed, event);
+
         Assertions.assertEquals(2, event.getCount());
     }
 

@@ -24,7 +24,6 @@ import org.apache.flink.kubernetes.operator.TestingFlinkService;
 import org.apache.flink.kubernetes.operator.api.FlinkSessionJob;
 import org.apache.flink.kubernetes.operator.api.status.FlinkSessionJobStatus;
 import org.apache.flink.kubernetes.operator.config.FlinkConfigManager;
-import org.apache.flink.kubernetes.operator.health.CanaryResourceManager;
 import org.apache.flink.kubernetes.operator.metrics.MetricManager;
 import org.apache.flink.kubernetes.operator.observer.sessionjob.FlinkSessionJobObserver;
 import org.apache.flink.kubernetes.operator.reconciler.ReconciliationUtils;
@@ -45,7 +44,6 @@ import io.javaoperatorsdk.operator.api.reconciler.EventSourceContext;
 import io.javaoperatorsdk.operator.api.reconciler.EventSourceInitializer;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
 import io.javaoperatorsdk.operator.processing.event.source.EventSource;
-import lombok.Getter;
 
 import java.util.Map;
 import java.util.Queue;
@@ -58,7 +56,6 @@ public class TestingFlinkSessionJobController
                 EventSourceInitializer<FlinkSessionJob>,
                 Cleaner<FlinkSessionJob> {
 
-    @Getter private CanaryResourceManager<FlinkSessionJob> canaryResourceManager;
     private FlinkSessionJobController flinkSessionJobController;
     private TestingFlinkSessionJobController.StatusUpdateCounter statusUpdateCounter =
             new TestingFlinkSessionJobController.StatusUpdateCounter();
@@ -82,19 +79,15 @@ public class TestingFlinkSessionJobController
         statusRecorder =
                 new StatusRecorder<>(kubernetesClient, new MetricManager<>(), statusUpdateCounter);
 
-        canaryResourceManager = new CanaryResourceManager<>(configManager, kubernetesClient);
-
         flinkSessionJobController =
                 new FlinkSessionJobController(
                         configManager,
                         ValidatorUtils.discoverValidators(configManager),
                         ctxFactory,
-                        new SessionJobReconciler(
-                                kubernetesClient, eventRecorder, statusRecorder, configManager),
+                        new SessionJobReconciler(kubernetesClient, eventRecorder, statusRecorder),
                         new FlinkSessionJobObserver(configManager, eventRecorder),
                         statusRecorder,
-                        eventRecorder,
-                        canaryResourceManager);
+                        eventRecorder);
     }
 
     @Override

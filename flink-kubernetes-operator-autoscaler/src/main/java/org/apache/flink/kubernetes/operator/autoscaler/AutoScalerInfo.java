@@ -21,13 +21,12 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.kubernetes.operator.api.AbstractFlinkResource;
 import org.apache.flink.kubernetes.operator.autoscaler.config.AutoScalerOptions;
-import org.apache.flink.kubernetes.operator.autoscaler.metrics.CollectedMetrics;
-import org.apache.flink.kubernetes.operator.autoscaler.utils.AutoScalerSerDeModule;
+import org.apache.flink.kubernetes.operator.autoscaler.metrics.ScalingMetric;
+import org.apache.flink.kubernetes.operator.autoscaler.utils.JobVertexSerDeModule;
 import org.apache.flink.kubernetes.utils.Constants;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.util.Preconditions;
 
-import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -36,25 +35,16 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import lombok.SneakyThrows;
-import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.yaml.snakeyaml.LoaderOptions;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
 
 /** Class for encapsulating information stored for each resource when using the autoscaler. */
 public class AutoScalerInfo {
@@ -63,16 +53,14 @@ public class AutoScalerInfo {
 
     private static final String LABEL_COMPONENT_AUTOSCALER = "autoscaler";
 
-    protected static final String COLLECTED_METRICS_KEY = "collectedMetrics";
-    protected static final String SCALING_HISTORY_KEY = "scalingHistory";
-    protected static final String JOB_UPDATE_TS_KEY = "jobUpdateTs";
+    private static final String COLLECTED_METRICS_KEY = "collectedMetrics";
+    private static final String SCALING_HISTORY_KEY = "scalingHistory";
+    private static final String JOB_UPDATE_TS_KEY = "jobUpdateTs";
 
-    protected static final int MAX_CM_BYTES = 1000000;
-
-    protected static final ObjectMapper YAML_MAPPER =
-            new ObjectMapper(yamlFactory())
+    private static final ObjectMapper YAML_MAPPER =
+            new ObjectMapper(new YAMLFactory())
                     .registerModule(new JavaTimeModule())
-                    .registerModule(new AutoScalerSerDeModule());
+                    .registerModule(new JobVertexSerDeModule());
 
     private final ConfigMap configMap;
     private Map<JobVertexID, SortedMap<Instant, ScalingSummary>> scalingHistory;
@@ -87,28 +75,21 @@ public class AutoScalerInfo {
         configMap.setData(Preconditions.checkNotNull(data));
     }
 
-    public SortedMap<Instant, CollectedMetrics> getMetricHistory() {
+    @SneakyThrows
+    public SortedMap<Instant, Map<JobVertexID, Map<ScalingMetric, Double>>> getMetricHistory() {
         var historyYaml = configMap.getData().get(COLLECTED_METRICS_KEY);
         if (historyYaml == null) {
             return new TreeMap<>();
         }
 
-        try {
-            return YAML_MAPPER.readValue(decompress(historyYaml), new TypeReference<>() {});
-        } catch (JacksonException e) {
-            LOG.error(
-                    "Could not deserialize metric history, possibly the format changed. Discarding...");
-            configMap.getData().remove(COLLECTED_METRICS_KEY);
-            return new TreeMap<>();
-        }
+        return YAML_MAPPER.readValue(historyYaml, new TypeReference<>() {});
     }
 
     @SneakyThrows
     public void updateMetricHistory(
-            Instant jobUpdateTs, SortedMap<Instant, CollectedMetrics> history) {
-        configMap
-                .getData()
-                .put(COLLECTED_METRICS_KEY, compress(YAML_MAPPER.writeValueAsString(history)));
+            Instant jobUpdateTs,
+            SortedMap<Instant, Map<JobVertexID, Map<ScalingMetric, Double>>> history) {
+        configMap.getData().put(COLLECTED_METRICS_KEY, YAML_MAPPER.writeValueAsString(history));
         configMap.getData().put(JOB_UPDATE_TS_KEY, jobUpdateTs.toString());
     }
 
@@ -118,7 +99,9 @@ public class AutoScalerInfo {
         getScalingHistory();
 
         if (scalingHistory.keySet().removeIf(v -> !vertexList.contains(v))) {
-            storeScalingHistory();
+            configMap
+                    .getData()
+                    .put(SCALING_HISTORY_KEY, YAML_MAPPER.writeValueAsString(scalingHistory));
         }
     }
 
@@ -136,19 +119,11 @@ public class AutoScalerInfo {
         if (scalingHistory != null) {
             return scalingHistory;
         }
-        var yaml = decompress(configMap.getData().get(SCALING_HISTORY_KEY));
-        if (yaml == null) {
-            scalingHistory = new HashMap<>();
-            return scalingHistory;
-        }
-        try {
-            scalingHistory = YAML_MAPPER.readValue(yaml, new TypeReference<>() {});
-        } catch (JacksonException e) {
-            LOG.error(
-                    "Could not deserialize scaling history, possibly the format changed. Discarding...");
-            configMap.getData().remove(SCALING_HISTORY_KEY);
-            scalingHistory = new HashMap<>();
-        }
+        var yaml = configMap.getData().get(SCALING_HISTORY_KEY);
+        scalingHistory =
+                yaml == null
+                        ? new HashMap<>()
+                        : YAML_MAPPER.readValue(yaml, new TypeReference<>() {});
         return scalingHistory;
     }
 
@@ -183,42 +158,13 @@ public class AutoScalerInfo {
             }
         }
 
-        storeScalingHistory();
-    }
-
-    private void storeScalingHistory() throws Exception {
         configMap
                 .getData()
-                .put(SCALING_HISTORY_KEY, compress(YAML_MAPPER.writeValueAsString(scalingHistory)));
+                .put(SCALING_HISTORY_KEY, YAML_MAPPER.writeValueAsString(scalingHistory));
     }
 
-    public void replaceInKubernetes(KubernetesClient client) throws Exception {
-        trimHistoryToMaxCmSize();
-        client.resource(configMap).update();
-    }
-
-    @VisibleForTesting
-    protected void trimHistoryToMaxCmSize() throws Exception {
-        var data = configMap.getData();
-
-        int scalingHistorySize = data.getOrDefault(SCALING_HISTORY_KEY, "").length();
-        int metricHistorySize = data.getOrDefault(COLLECTED_METRICS_KEY, "").length();
-
-        SortedMap<Instant, CollectedMetrics> metricHistory = null;
-        while (scalingHistorySize + metricHistorySize > MAX_CM_BYTES) {
-            if (metricHistory == null) {
-                metricHistory = getMetricHistory();
-            }
-            if (metricHistory.isEmpty()) {
-                return;
-            }
-            var firstKey = metricHistory.firstKey();
-            LOG.info("Trimming metric history by removing {}", firstKey);
-            metricHistory.remove(firstKey);
-            String compressed = compress(YAML_MAPPER.writeValueAsString(metricHistory));
-            data.put(COLLECTED_METRICS_KEY, compressed);
-            metricHistorySize = compressed.length();
-        }
+    public void replaceInKubernetes(KubernetesClient client) {
+        client.resource(configMap).replace();
     }
 
     public static AutoScalerInfo forResource(
@@ -258,38 +204,5 @@ public class AutoScalerInfo {
                         .inNamespace(objectMeta.getNamespace())
                         .withName(objectMeta.getName())
                         .get());
-    }
-
-    private static String compress(String original) throws IOException {
-        ByteArrayOutputStream rstBao = new ByteArrayOutputStream();
-        try (var zos = new GZIPOutputStream(rstBao)) {
-            zos.write(original.getBytes(StandardCharsets.UTF_8));
-        }
-
-        return Base64.getEncoder().encodeToString(rstBao.toByteArray());
-    }
-
-    private static String decompress(String compressed) {
-        if (compressed == null) {
-            return null;
-        }
-
-        try {
-            byte[] bytes = Base64.getDecoder().decode(compressed);
-            try (var zi = new GZIPInputStream(new ByteArrayInputStream(bytes))) {
-                return IOUtils.toString(zi, StandardCharsets.UTF_8);
-            }
-        } catch (Exception e) {
-            LOG.warn("Error while decompressing scaling data, treating as uncompressed");
-            // Fall back to non-compressed for migration
-            return compressed;
-        }
-    }
-
-    private static YAMLFactory yamlFactory() {
-        // Set yaml size limit to 10mb
-        var loaderOptions = new LoaderOptions();
-        loaderOptions.setCodePointLimit(20 * 1024 * 1024);
-        return YAMLFactory.builder().loaderOptions(loaderOptions).build();
     }
 }

@@ -19,7 +19,6 @@ package org.apache.flink.kubernetes.operator.api.status;
 
 import org.apache.flink.kubernetes.operator.api.spec.FlinkDeploymentSpec;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
@@ -30,7 +29,6 @@ import lombok.ToString;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class FlinkDeploymentReconciliationStatus extends ReconciliationStatus<FlinkDeploymentSpec> {
 
     @Override

@@ -19,7 +19,6 @@ package org.apache.flink.kubernetes.operator.api.status;
 
 import org.apache.flink.annotation.Experimental;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.fabric8.kubernetes.model.annotation.LabelSelector;
 import io.fabric8.kubernetes.model.annotation.StatusReplicas;
 import lombok.AllArgsConstructor;
@@ -33,7 +32,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder(toBuilder = true)
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class TaskManagerInfo {
     /** TaskManager label selector. */
     @LabelSelector private String labelSelector;
